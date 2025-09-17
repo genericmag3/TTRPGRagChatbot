@@ -5,9 +5,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 from langchain.schema.output_parser import StrOutputParser
-#from termcolor import colored
+
 #import emoji as moji
 import streamlit as st
+
+user_first_interaction = True
 
 # Initialize vector store
 vector_store = Chroma(
@@ -17,11 +19,11 @@ vector_store = Chroma(
 )
 
 retriever = vector_store.as_retriever(
-    search_kwargs={"k": 10}
+    search_kwargs={"k": 5}
 )
 
 # Set up model
-model = OllamaLLM(model="phi4:14b")
+model = OllamaLLM(model="llama3.2")
 model.temperature = .6
 
 #Title streamlit chat window
@@ -39,8 +41,8 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-user_question = st.text_input("Ask a question about the campaign...")
-
+#user_question = # Show chat input at the bottom when a question has been asked.
+user_question = st.chat_input("Ask a question about the campaign...")
 if user_question:
 
     st.session_state.messages.append({"role": "user", "content": user_question})
@@ -65,9 +67,9 @@ if user_question:
     response+="\n______________________________________________________\n"
     response+="Note entry References(Title, date): \n"
     for item in notes:
-        response += "* " + item.metadata["title"] + ", " + item.metadata["date"] + "\n"
+        response+=str(item.metadata) + "\n"
     response+="\n______________________________________________________\n"
-    #st.write(response)
-    st.session_state.messages.append({"role": "assistant", "content": response})
-    with st.chat_message("assistant"):
+    st.session_state.messages.append({"role": "assistant", "content": response, "avatar":"🧙‍♂️"})
+    with st.chat_message("assistant", avatar="🧙‍♂️"):
         st.markdown(response)
+  
