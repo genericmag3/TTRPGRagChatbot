@@ -5,9 +5,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 from langchain.schema.output_parser import StrOutputParser
+from langchain_core.documents import Document
 from streamlit_lottie import st_lottie
 import json
 import requests
+import pandas as pd
 
 import streamlit as st
 
@@ -35,6 +37,40 @@ with open("star-magic.json", "r",errors='ignore') as f:
 
 # Set up retriever in streamlit app
 st.session_state.retriever = retriever
+
+disable_loader = False
+
+# Have user upload campaign notes
+note_document = st.file_uploader(
+    "Upload Campaign Notes", accept_multiple_files=False, type="csv", disabled = disable_loader
+)
+
+# Create vector database from file
+if note_document is not None:
+    df = pd.read_csv(note_document)
+    embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    db_location = "./chrome_langchain_db"
+    
+    if df is not None: # to do: add error checking
+        documents = []
+        ids = []
+        
+        for i, row in df.iterrows():
+            document = Document(
+                page_content=row["Contents"],
+                metadata={"Title": row["Title"], "Date": row["Date"]},
+                id=str(i)
+            )
+            ids.append(str(i))
+            documents.append(document)
+            vector_store = Chroma(
+                collection_name="notes",
+                persist_directory=db_location,
+                embedding_function=embeddings
+                )
+    if vector_store != None: # To do: add error checking
+        vector_store.add_documents(documents=documents, ids=ids)
+    disable_loader = True
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -76,10 +112,9 @@ if user_question:
     response = chain.invoke({"question": user_question, "notes": notes})  # Pass the query and relevant note documents
 
     response+="\n______________________________________________________\n"
-    response+="Note entry References(Title, date): \n"
+    response+="Note entry References(date): \n"
     for item in notes:
-        response += "* " + item.metadata["title"] + ", " + item.metadata["date"] + "\n"
-        #response += str(item.metadata)
+        response += "* " + item.metadata["Date"] + "\n"
     response+="\n______________________________________________________\n"
     st.session_state.messages.append({"role": "assistant", "content": response, "avatar":"🧙‍♂️"})
     placeholder.empty()
