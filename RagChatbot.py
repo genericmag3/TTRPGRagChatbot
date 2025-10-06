@@ -76,7 +76,8 @@ vector_store = Chroma(
             embedding_function=hf_embeddings
 )
 retriever = vector_store.as_retriever(
-        search_kwargs={"k": 9}
+        search_type="similarity_score_threshold",
+        search_kwargs={"k": 9, "score_threshold": 0.1}
 )
 
 
@@ -161,10 +162,7 @@ if notes_uploaded:
             ("system", "You are a helpful D&D adventure Q&A bot."),
             ("user", "You are an expert in answering questions about a Dungeons and Dragons campaign described in provided documents. The provided documents describe a campaign where the main protagonists are Brocc, Evryn, and Gwendolyn(Gwen). Here are the relevant documents with a date and title from the character Brocc's perspective (sometimes in first person and sometimes in third person): {notes} \n\n Here is the question to answer. Base your answer only off of the provided documents, and no other extraneous material. Do not provide references to the documents.: {question}")
         ])
-            
         notes = retriever.invoke(user_question)
-        print(notes)
-
         chain = (
             prompt
             | model
