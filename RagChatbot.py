@@ -11,22 +11,13 @@ import json
 import requests
 import pandas as pd
 import time
+import os
 
 import streamlit as st
+from streamlit_modal import Modal
 
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
-
-# Initialize vector store
-# vector_store = Chroma(
-#     collection_name="notes",
-#     persist_directory="./chrome_langchain_db",
-#     embedding_function=OllamaEmbeddings(model="mxbai-embed-large")
-# )
-
-#retriever = vector_store.as_retriever(
-#    search_kwargs={"k": 5}
-#)
 
 # Set up model
 model = OllamaLLM(model="phi4:14b")
@@ -50,6 +41,9 @@ with open("Magical_Effect_Loading.json", "r",errors='ignore') as f:
 
 notes_uploaded = False
 
+if "first_chat_key" not in st.session_state:
+    st.session_state.first_chat_key = 0
+
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
@@ -57,14 +51,20 @@ def update_key():
     st.session_state.uploader_key += 1
 
 note_document = None
+databasedir = "./chrome_langchain_db"
 
-if st.session_state.uploader_key == 0:
+# if the database already exists, skip the upload. 
+# To do: allow for re-upload of notes via sidebar button
+if os.path.isdir(databasedir):
+    notes_uploaded = True
+    update_key()
+    #notes = []
+elif st.session_state.uploader_key == 0:
     placeholder = st.empty()
     # Have user upload campaign notes
     with placeholder.container():
         note_document = st.file_uploader("Upload your campaign notes", type=["csv"]) #key=st.session_state.uploader_key, on_change=update_key
-else:
-    notes_uploaded = True
+
 
 #"sentence-transformers/all-MiniLM-L6-v2"
 
@@ -72,7 +72,7 @@ hf_embeddings = HuggingFaceEmbeddings(model_kwargs={"device": "cpu"})
 text_splitter = SemanticChunker(hf_embeddings)
 vector_store = Chroma(
             collection_name="notes",
-            persist_directory="./chrome_langchain_db",
+            persist_directory=databasedir,
             embedding_function=hf_embeddings
 )
 retriever = vector_store.as_retriever(
@@ -104,7 +104,7 @@ if note_document is not None:
     if df is not None: # to do: add error checking
         documents = []
         ids = []
-        k = 0 #init document ID
+        l = 0 #init document ID
         
         for i, row in df.iterrows():
             text = row["Contents"]
@@ -115,9 +115,9 @@ if note_document is not None:
                     metadata={"Title": row["Title"], "Date": row["Date"], "Exerpt Start": chunk[:25], "Exerpt End": chunk[-25:]},
                     id=str(i)
                 )
-                ids.append(str(k))
+                ids.append(str(l))
                 documents.append(document)
-                k += 1
+                l += 1
             percent_complete = percent_complete + 100/df.shape[0]
             if(percent_complete <= 100):
                 my_bar.progress(int(percent_complete), text=progress_text)
@@ -126,24 +126,81 @@ if note_document is not None:
 
         #message_placeholder = st.empty()
         update_key()
+        #stop loading animation
         animationplaceholder.empty()
-        #placeholder.empty()
+        
         success = st.success("Campaign notes uploaded and processed successfully!")
         notes_uploaded = True
     
 
 
 
-# Initialize chat history
-if "messages" not in st.session_state:
+# Initialize chat and reference history
+if ("messages" not in st.session_state) or ("references" not in st.session_state) or ("buttons" not in st.session_state):
     st.session_state.messages = []
+    st.session_state.references = [] # use this to append references per bot response
+    st.session_state.buttons = []
+    st.session_state.buttoninfo = []
+    st.session_state.button_key = 0
 
-# Display chat messages from history on app rerun
+k = 0
+
+# st.markdown(  # todo: clean up this custom html. Make it a variable
+#                 """
+#                     <style>
+#                     button {
+#                         background: none!important;
+#                         border: none;
+#                         padding: 0!important;
+#                         color: black !important;
+#                         text-decoration: none;
+#                         cursor: pointer;
+#                         border: none !important;
+#                     }
+#                     button:hover {
+#                         text-decoration: none;
+#                         color: black !important;
+#                     }
+#                     button:focus {
+#                         outline: none !important;
+#                         box-shadow: none !important;
+#                         color: black !important;
+#                     }
+#                     </style>
+#                     """,
+#                     unsafe_allow_html=True
+#                 )
+
+# Display chat messages and references from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message["role"], avatar=message["avatar"]):
+        print("message content")
         st.markdown(message["content"])
+        print(message["role"])
+        if (message["role"] == "assistant"):
+            print("creating buttons for the assistant response")
+            for refs in st.session_state.references:
+                # Create buttons for
+                print("generating buttons for a specific bot response")
+                #st.session_state.buttons[k:k+len(refs)] 
+                for button in st.session_state.buttoninfo[k:k+len(refs)]:
+                    #button
+                    st.button(button[0], on_click = button[1], args = button[2], key = button[3])
+                    #print(button.key)
+                k = k + len(refs)
+            
+            # for item in st.session_state.references[k]:
+            #     k = k + 1
+            #     if st.button(item.metadata["Date"], key=f"click_{k}"):
+            #         st.dialog(str(item.page_content))
 
 
+# init References history
+
+def reference_button(content):
+    modal = Modal(key = "reference_modal", title="Reference Content")
+    with modal.container():
+        st.markdown(content)
 #user_question = # Show chat input at the bottom when a question has been asked.
 if notes_uploaded:
     user_question = st.chat_input("Ask a question about the campaign...")
@@ -171,12 +228,31 @@ if notes_uploaded:
         response = chain.invoke({"question": user_question, "notes": notes})  # Pass the query and relevant note documents
 
         response+="\n______________________________________________________\n"
-        response+="Note entry References(date): \n"
-        for item in notes:
-            response += "* " + item.metadata["Date"] +" " + " '" + item.metadata["Exerpt Start"] + "..." + item.metadata["Exerpt End"] + "'\n"
-        response+="\n______________________________________________________\n"
+        response+="Note entry References: \n"
+        
+        #response+="\n______________________________________________________\n"
         st.session_state.messages.append({"role": "assistant", "content": response, "avatar":"🧙‍♂️"})
         placeholder.empty()
         with st.chat_message("assistant", avatar="🧙‍♂️"):
-            st.markdown(response)
-  
+            st.markdown(response)    
+        st.session_state.references.append(notes) # save group of references per bot response
+            # Create a unique button for each reference
+        for item in notes:
+            st.session_state.buttons.append(st.button(str(item.metadata["Date"]), on_click= reference_button,args=(item.page_content,),  key = f"click_{st.session_state.button_key}"))
+            st.session_state.buttoninfo.append([item.metadata["Date"],reference_button, (item.page_content,), f"click_{st.session_state.button_key}"])
+            st.session_state.button_key = st.session_state.button_key + 1
+        st.session_state.first_chat_key = 1 
+
+#print(st.session_state.references)
+
+
+#print(st.session_state.references[:len(st.session_state.references[-1])][0].page_content)
+
+#if st.session_state.first_chat_key == 1:  
+    #print(st.session_state.references[:len(st.session_state.references[-1])][0].page_content)              
+#     #for item in st.session_state.references[-1]:
+#         #k = k + 1
+#     for i, button in enumerate(st.session_state.buttons[:len(st.session_state.references[-1])]):
+#         if button:
+#             print(st.session_state.references[:len(st.session_state.references[-1])][i].page_content)
+#             #st.dialog(st.session_state.references[:len(st.session_state.references[-1])][i])
