@@ -13,7 +13,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 import streamlit as st
 
 # Set up model
-@st.cache_resource
+#@st.cache_resource
 def load_model(modelname):
     model = OllamaLLM(model=modelname)
     return model
@@ -73,7 +73,7 @@ elif st.session_state.uploader_key == 0:
         note_document = st.file_uploader("Upload your campaign notes", type=["csv"]) #key=st.session_state.uploader_key, on_change=update_key
 
 # Can all of this be cached?
-@st.cache_resource(show_spinner=False)
+#@st.cache_resource(show_spinner=False)
 def load_embeddings():
     embeddings = HuggingFaceEmbeddings(model_kwargs={"device": "cpu"})
     return embeddings
@@ -90,7 +90,7 @@ retriever = vector_store.as_retriever(
         search_kwargs={"k": 9, "score_threshold": 0.1}
 )
 
-
+success = None
 # Create vector database from file
 if note_document is not None:
 
@@ -111,7 +111,7 @@ if note_document is not None:
     
     if df is not None: # to do: add error checking
         documents = []
-        ids = []
+        idlist = []
         l = 0 #init document ID
         for i, row in df.iterrows():
             text = row["Contents"]
@@ -120,16 +120,16 @@ if note_document is not None:
                 document = Document(
                     page_content=chunk,
                     metadata={"Title": row["Title"], "Date": row["Date"], "Exerpt Start": chunk[:25], "Exerpt End": chunk[-25:]},
-                    id=str(i)
+                    id=str(l)
                 )
-                ids.append(id)
+                idlist.append(str(l))
                 documents.append(document)
                 l += 1
             percent_complete = percent_complete + 100/df.shape[0]
             if(percent_complete <= 100):
                 my_bar.progress(int(percent_complete), text=progress_text)
         if vector_store != None: # To do: add error checking
-            vector_store.add_documents(documents=documents, ids=ids)
+            vector_store.add_documents(documents=documents, ids=idlist)
         update_key()
         #stop loading animation
         animationplaceholder.empty()
@@ -167,6 +167,8 @@ def stream_data(response):
 if notes_uploaded:
     user_question = st.chat_input("Ask a question about the campaign...")
     if user_question:
+        if success is not None:
+            success.empty()
         tempbuttoninfo = []
         st.session_state.messages.append({"role": "user", "content": user_question,"avatar":None})
         with st.chat_message("user"):
