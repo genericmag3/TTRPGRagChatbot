@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 import re
@@ -8,15 +7,18 @@ import io
 from langchain.docstore.document import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
+from langchain.docstore.document import Document as langchaindoc
+from docx import Document as DocxReader
+import streamlit as st
 
 df = pd.read_csv("Notes.csv")
-embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+#embeddings = OllamaEmbeddings(model="mxbai-embed-large")
 
 db_location = "./chrome_langchain_db"
 #add_documents = not os.path.exists(db_location)
 
 def load_embeddings():
-    embeddings = HuggingFaceEmbeddings(model_kwargs={"device": "cpu"})
+    embeddings = HuggingFaceEmbeddings(model_kwargs={"device": "cpu"}) # add check for cuda version and use 'cuda' if compatible?
     return embeddings
 
 def parse_journal_text(file_content, databasedir):
@@ -66,4 +68,74 @@ def create_hf_retrival_artifacts(databasedir):
         )
     return text_splitter,retriever,vector_store
 
-#def vectorize_dataframe()
+
+def convert_document_into_dataframe(document, databasedir):
+    file_extension = document.name.split('.')[-1].lower()
+    
+    if file_extension == 'csv':
+        df = pd.read_csv(document)
+    elif file_extension == 'docx':
+        # Read the file into a buffer
+        bytes_data = document.read()
+        doc_io = io.BytesIO(bytes_data)
+        document = DocxReader(doc_io)
+
+        # Create list of paragraphs
+        document_text = []
+        for paragraph in document.paragraphs:
+            document_text.append(paragraph.text)
+            
+        # Join paragraphs together with newline character
+        text_content = '\n'.join(document_text)
+
+        # Parse text content into same dataframe structure
+        df = parse_journal_text(text_content, databasedir)
+    # simple text document
+    else:
+        # Read the text file content and parse it into the same dataframe structure
+        stringio = io.StringIO(document.getvalue().decode("utf-8"))
+        df = parse_journal_text(stringio.read(), databasedir)
+    
+    return df
+
+def vectorize_note_document(document, databasedir, text_splitter, retriever, vector_store):
+    df = convert_document_into_dataframe(document, databasedir)
+    retCode = True
+
+    if df is not None and not df.empty:
+        documents = []
+        idlist = []
+        l = 0 
+        
+        for i, row in df.iterrows():
+            text = str(row["Contents"])
+            # Existing semantic chunking via text_splitter
+            chunks = text_splitter.split_text(text)
+            for chunk in chunks:
+                document = langchaindoc(
+                    page_content=chunk,
+                    metadata={
+                        "Title": row.get("Title", "Untitled"), 
+                        "Date": str(row.get("Date", "Unknown")), 
+                        "Exerpt Start": chunk[:25], 
+                        "Exerpt End": chunk[-25:]
+                    },
+                    id=str(l)
+                )
+                idlist.append(str(l))
+                documents.append(document)
+                l += 1
+            
+            # Progress bar logic
+            percent_complete = (i + 1) / len(df) * 100
+            yield percent_complete # provide percent complete for progress bar usage
+            #progressBar.progress(int(percent_complete), text=progress_text)
+                
+        if vector_store is not None:
+            vector_store.add_documents(documents=documents, ids=idlist)
+        else:
+            retCode = False 
+    else:
+        retCode = False
+
+    return retCode

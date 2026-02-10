@@ -13,7 +13,6 @@ import re
 import io
 from langchain.docstore.document import Document as langchaindoc
 from langchain_experimental.text_splitter import SemanticChunker
-from docx import Document as DocxReader
 
 #import local modules
 import CreateDatabase
@@ -27,7 +26,7 @@ def load_model(modelname):
 #Title streamlit chat window
 st.title("D&D Q&A Chatbot 🧙‍♂️")
 
-st.info("This app takes your notes from your campaign and passes relevant context from them along with your question to the LLM. It does not store your notes or chat history. Please consult provided references as the AI may hallucinate.")
+st.info("This app takes your notes from your campaign and passes relevant context from them along with your question to the local LLM. It does not store your notes or chat history. Please consult provided references as the AI may hallucinate.")
 
 model = load_model("phi4:14b")
 model.temperature = .7
@@ -63,6 +62,40 @@ def has_subfolders(directory_path):
             return True
     return False
 
+def create_database_handler(document, databasedir, text_splitter, retriever, vector_store):
+    # Initialize the generator
+    gen = CreateDatabase.vectorize_note_document(document, databasedir, text_splitter, retriever, vector_store)
+    animationplaceholder = st.empty()
+    with animationplaceholder.container():
+        st_lottie(magic_loader, height=200, key="custom_loading_spinner")
+        progress_text = "Casting Vectorization Spell..."
+        vectorization_progress = st.progress(0, text=progress_text)
+    returnCode = None
+    
+     # Use a manual loop to capture the return value from StopIteration
+    while True:
+        try:
+            # Get the next yielded progress value
+            progress = next(gen)
+            vectorization_progress.progress(progress / 100, text=f"Casting vectorization spell... {progress:.1f}%")
+        except StopIteration as e:
+            # This is where your 'return True' or 'return False' from the generator lives
+            returnCode = e.value
+            #break
+             # Handle completion logic
+            animationplaceholder.empty()
+            #vectorization_progress.empty() # Remove progress bar on finish
+            return returnCode
+
+    # Handle completion logic
+    """ animationplaceholder.empty()
+    vectorization_progress.empty() # Remove progress bar on finish
+    if returnCode is True:
+        return True
+    else:
+        return False """
+        
+
 databasedir = "./chrome_langchain_db"
 
 # if the database already exists, skip the upload. 
@@ -74,82 +107,25 @@ elif st.session_state.uploader_key == 0:
     placeholder = st.empty()
     # Have user upload campaign notes
     with placeholder.container():
-        note_document = st.file_uploader("Upload your campaign notes") #key=st.session_state.uploader_key, on_change=update_key
+        note_document = st.file_uploader("Upload your campaign notes")
 
 # Init text splitter, retriever, and vector database
-text_splitter, retriever,vector_store = CreateDatabase.create_hf_retrival_artifacts(databasedir)
+text_splitter, retriever, vector_store = CreateDatabase.create_hf_retrival_artifacts(databasedir)
 
-success = None
-# Create vector database from file if file has been uploaded
+completionmessage = None
+# Create vector database from file if file has been uploaded by user
 if note_document is not None:
     #get rid of the file uploader container once file has been selected
     placeholder.empty()
     #start data upload and database creation animation
-    animationplaceholder = st.empty()
-        # Display the animation initially
-    with animationplaceholder.container():
-        st_lottie(magic_loader, height=200, key="custom_loading_spinner")
-        progress_text = "Casting Vectorization Spell..."
-        vectorization_progress = st.progress(0, text=progress_text)
-
-    file_extension = note_document.name.split('.')[-1].lower()
-
-    if file_extension == 'csv':
-        df = pd.read_csv(note_document)
-    elif file_extension == 'docx':
-        # Read the file into a buffer
-        bytes_data = note_document.read()
-        doc_io = io.BytesIO(bytes_data)
-        document = DocxReader(doc_io)
-
-        document_text = []
-        for paragraph in document.paragraphs:
-            document_text.append(paragraph.text)
-            
-        # Join paragraphs together with newline character
-        text_content = '\n'.join(document_text)
-
-        df = CreateDatabase.parse_journal_text(text_content, databasedir)
-    else:
-        # Read the text file content and parse it into the same dataframe structure
-        stringio = io.StringIO(note_document.getvalue().decode("utf-8"))
-        df = CreateDatabase.parse_journal_text(stringio.read(), databasedir)
-
-    if df is not None and not df.empty:
-        documents = []
-        idlist = []
-        l = 0 
-        
-        for i, row in df.iterrows():
-            text = str(row["Contents"])
-            # Existing semantic chunking via text_splitter
-            chunks = text_splitter.split_text(text)
-            for chunk in chunks:
-                document = langchaindoc(
-                    page_content=chunk,
-                    metadata={
-                        "Title": row.get("Title", "Untitled"), 
-                        "Date": str(row.get("Date", "Unknown")), 
-                        "Exerpt Start": chunk[:25], 
-                        "Exerpt End": chunk[-25:]
-                    },
-                    id=str(l)
-                )
-                idlist.append(str(l))
-                documents.append(document)
-                l += 1
-            
-            # Progress bar logic
-            percent_complete = (i + 1) / len(df) * 100
-            vectorization_progress.progress(int(percent_complete), text=progress_text)
-                
-        if vector_store is not None:
-            vector_store.add_documents(documents=documents, ids=idlist)
-        
-        animationplaceholder.empty()
-        notes_uploaded = True
+    notes_uploaded = create_database_handler(note_document, databasedir, text_splitter, retriever, vector_store)
+    print(notes_uploaded)
+    if(notes_uploaded == True):
+        completionmessage = st.empty()
         st.success("Journal processed successfully!")
-   
+    else:
+        completionmessage = st.empty()
+        st.error("Failed to vectorize database. Check file existence or disk space.")
 
 # Initialize session state variables
 if ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state):
@@ -181,8 +157,8 @@ def stream_data(response):
 if notes_uploaded:
     user_question = st.chat_input("Ask a question about the campaign...")
     if user_question:
-        if success is not None:
-            success.empty()
+        if completionmessage is not None:
+            completionmessage.empty()
         tempbuttoninfo = []
         st.session_state.messages.append({"role": "user", "content": user_question,"avatar":None})
         with st.chat_message("user"):
