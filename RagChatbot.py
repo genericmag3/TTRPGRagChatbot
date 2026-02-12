@@ -18,7 +18,7 @@ from langchain_experimental.text_splitter import SemanticChunker
 import CreateDatabase
 
 # Set up model
-#@st.cache_resource
+@st.cache_resource
 def load_model(modelname):
     model = OllamaLLM(model=modelname)
     return model
@@ -63,7 +63,7 @@ def has_subfolders(directory_path):
     return False
 
 def create_database_handler(document, databasedir, text_splitter, retriever, vector_store):
-    # Initialize the generator
+    # Start database creation
     gen = CreateDatabase.vectorize_note_document(document, databasedir, text_splitter, retriever, vector_store)
     animationplaceholder = st.empty()
     with animationplaceholder.container():
@@ -77,23 +77,12 @@ def create_database_handler(document, databasedir, text_splitter, retriever, vec
         try:
             # Get the next yielded progress value
             progress = next(gen)
-            vectorization_progress.progress(progress / 100, text=f"Casting vectorization spell... {progress:.1f}%")
+            vectorization_progress.progress(progress / 100, text= progress_text + f"{progress:.1f}%")
         except StopIteration as e:
             # This is where your 'return True' or 'return False' from the generator lives
             returnCode = e.value
-            #break
-             # Handle completion logic
             animationplaceholder.empty()
-            #vectorization_progress.empty() # Remove progress bar on finish
             return returnCode
-
-    # Handle completion logic
-    """ animationplaceholder.empty()
-    vectorization_progress.empty() # Remove progress bar on finish
-    if returnCode is True:
-        return True
-    else:
-        return False """
         
 
 databasedir = "./chrome_langchain_db"

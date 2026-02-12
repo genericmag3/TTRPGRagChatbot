@@ -98,6 +98,7 @@ def convert_document_into_dataframe(document, databasedir):
     
     return df
 
+# function yeilds progress percent until final returncode
 def vectorize_note_document(document, databasedir, text_splitter, retriever, vector_store):
     df = convert_document_into_dataframe(document, databasedir)
     retCode = True
@@ -129,7 +130,6 @@ def vectorize_note_document(document, databasedir, text_splitter, retriever, vec
             # Progress bar logic
             percent_complete = (i + 1) / len(df) * 100
             yield percent_complete # provide percent complete for progress bar usage
-            #progressBar.progress(int(percent_complete), text=progress_text)
                 
         if vector_store is not None:
             vector_store.add_documents(documents=documents, ids=idlist)
