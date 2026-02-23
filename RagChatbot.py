@@ -17,40 +17,13 @@ from langchain_experimental.text_splitter import SemanticChunker
 #import local modules
 import CreateDatabase
 
+# Local Function definitions 
+
 # Set up model
 @st.cache_resource
 def load_model(modelname):
     model = OllamaLLM(model=modelname)
     return model
-
-#Title streamlit chat window
-st.title("D&D Q&A Chatbot 🧙‍♂️")
-
-st.info("This app takes your notes from your campaign and passes relevant context from them along with your question to the local LLM. It does not store your notes or chat history. Please consult provided references as the AI may hallucinate.")
-
-model = load_model("phi4:14b")
-model.temperature = .7
-
-#Grab custom spinner animation
-with open("star-magic.json", "r",errors='ignore') as f:
-    magic_spinner = json.load(f)
-
-#Grab custom file upload animation
-with open("Magical_Effect_Loading.json", "r",errors='ignore') as f:
-    magic_loader = json.load(f)
-
-notes_uploaded = False
-
-if "first_chat_key" not in st.session_state:
-    st.session_state.first_chat_key = 0
-
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0
-
-def update_key():
-    st.session_state.uploader_key += 1
-
-note_document = None
 
 def has_subfolders(directory_path):
     if not os.path.isdir(directory_path):
@@ -83,7 +56,43 @@ def create_database_handler(document, databasedir, text_splitter, retriever, vec
             returnCode = e.value
             animationplaceholder.empty()
             return returnCode
-        
+
+def update_key():
+    if st.session_state.uploader_key is not None:
+        st.session_state.uploader_key += 1
+
+@st.dialog("Reference Content")
+def reference_button(content):
+    st.write(content)
+
+def stream_data(response):
+    for word in response.split(" "):
+        yield word + " "
+        time.sleep(0.02)
+
+#Initialize Streamlit chat window 
+st.title("D&D Q&A Chatbot 🧙‍♂️")
+
+st.info("This app takes your notes from your campaign and passes relevant context from them along with your question to the local LLM. It does not store your notes or chat history. Please consult provided references as the AI may hallucinate.")
+
+# This should eventually be done dynamically
+model = load_model("phi4:14b")
+model.temperature = .7
+
+#Grab custom spinner animation
+with open("star-magic.json", "r",errors='ignore') as f:
+    magic_spinner = json.load(f)
+
+#Grab custom file upload animation
+with open("Magical_Effect_Loading.json", "r",errors='ignore') as f:
+    magic_loader = json.load(f)
+
+notes_uploaded = False
+
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
+note_document = None
 
 databasedir = "./chrome_langchain_db"
 
@@ -134,15 +143,6 @@ for message in st.session_state.messages:
                     st.button(buttoninfo[0], on_click = buttoninfo[1], args = buttoninfo[2], key = buttoninfo[3])
             i = i + 1
 
-@st.dialog("Reference Content")
-def reference_button(content):
-    st.write(content)
-
-def stream_data(response):
-    for word in response.split(" "):
-        yield word + " "
-        time.sleep(0.02)
-
 if notes_uploaded:
     user_question = st.chat_input("Ask a question about the campaign...")
     if user_question:
@@ -190,7 +190,7 @@ if notes_uploaded:
                         st.session_state.button_key = st.session_state.button_key + 1
 
                     # Add button information to the session state            
-                    st.session_state.buttoninfo.append(tempbuttoninfo)
+                    st.session_state.buttoninfo.append(tempbuttoninfo) 
         # Save canned response to chat history if no references
         else:
             placeholder.empty()
@@ -199,4 +199,3 @@ if notes_uploaded:
             st.write_stream(stream_data(response))
             st.session_state.messages.append({"role": "assistant", "content": response, "avatar":"🧙‍♂️"})
         st.rerun()
-        

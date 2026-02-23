@@ -9,13 +9,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain.docstore.document import Document as langchaindoc
 from docx import Document as DocxReader
-import streamlit as st
-
-df = pd.read_csv("Notes.csv")
-#embeddings = OllamaEmbeddings(model="mxbai-embed-large")
-
-db_location = "./chrome_langchain_db"
-#add_documents = not os.path.exists(db_location)
+import streamlit as s
 
 def load_embeddings():
     embeddings = HuggingFaceEmbeddings(model_kwargs={"device": "cpu"}) # add check for cuda version and use 'cuda' if compatible?
