@@ -9,8 +9,6 @@ import pandas as pd
 import time
 import os
 import streamlit as st
-import re
-import io
 from langchain.docstore.document import Document as langchaindoc
 from langchain_experimental.text_splitter import SemanticChunker
 
@@ -89,8 +87,9 @@ with open("Magical_Effect_Loading.json", "r",errors='ignore') as f:
 
 notes_uploaded = False
 
-if "uploader_key" not in st.session_state:
+if ("uploader_key" not in st.session_state) or ("reupload_key" not in st.session_state):
     st.session_state.uploader_key = 0
+    st.session_state.reupload_key = 0
 
 note_document = None
 
@@ -98,10 +97,11 @@ databasedir = "./chrome_langchain_db"
 
 # if the database already exists, skip the upload. 
 # To do: allow for re-upload of notes via sidebar button
-if has_subfolders(databasedir):
+if has_subfolders(databasedir) and st.session_state.reupload_key == False:
     notes_uploaded = True
     update_key()
-elif st.session_state.uploader_key == 0:
+elif st.session_state.uploader_key == 0 or st.session_state.reupload_key == True:
+    notes_uploaded = False
     placeholder = st.empty()
     # Have user upload campaign notes
     with placeholder.container():
@@ -114,6 +114,7 @@ completionmessage = None
 # Create vector database from file if file has been uploaded by user
 if note_document is not None:
     #get rid of the file uploader container once file has been selected
+    st.session_state.reupload_key = 0
     placeholder.empty()
     #start data upload and database creation animation
     notes_uploaded = create_database_handler(note_document, databasedir, text_splitter, retriever, vector_store)
@@ -126,11 +127,10 @@ if note_document is not None:
         st.error("Failed to vectorize database. Check file existence or disk space.")
 
 # Initialize session state variables
-if ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state):
+if ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or (st.session_state.reupload_key == True):
     st.session_state.messages = []
     st.session_state.buttoninfo = []
     st.session_state.button_key = 0
-
 
 i = 0 #  represents index of references, each index can have multiple references and there is one per bot response
 # Display chat messages and references from history on app rerun
@@ -144,6 +144,12 @@ for message in st.session_state.messages:
             i = i + 1
 
 if notes_uploaded:
+    sidebar_button = st.sidebar.button('Re-Upload Notes')
+    if sidebar_button:
+        if os.path.exists(databasedir):
+            st.session_state.reupload_key = True
+            st.rerun()
+            
     user_question = st.chat_input("Ask a question about the campaign...")
     if user_question:
         if completionmessage is not None:
