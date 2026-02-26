@@ -9,8 +9,6 @@ The prompt template is limited to my campaign, notes can only be inputted as a C
 Coming features:
 - Modularize and generalize code to allow for easier future updates
 - Allow for user to input custom instructions to LLM
-- Generalize note parsing to allow for text-based notes rather than CSV
-- Allow for re-upload of notes
 - Automatically select LLM based on local system specs (GPU memory size)
 
 ## Demo
