@@ -7,6 +7,7 @@ import json
 import time
 import os
 import streamlit as st
+import numpy as np
 
 #import local modules
 import CreateDatabase
@@ -85,23 +86,15 @@ if ("uploader_key" not in st.session_state) or ("reupload_key" not in st.session
     st.session_state.model_chosen = None 
     st.session_state.model_temperature = None
 
-
-# This should eventually be done dynamically
+# Find local ollama models
 local_models = ollama.list()
 local_model_names = []
 for model in local_models.models:
     local_model_names.append(model.model)
 
-#model = load_model("phi4:14b")
-#model.temperature = .7# This should eventually be done dynamically
-#local_models = ollama.list()
-#local_model_names = []
-#for model in local_models['models']:
-#    local_model_names.append(model['name'])
-
-# sidebar logic
+# Sidebar model options
 sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names, index = None, placeholder = "Select local LLM...")
-sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", (.1, .2, .3, .4, .5, .6, .7, .8, .9, 1), index = None, placeholder = "Select local LLM Temperature...")
+sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", np.round(np.linspace(0.1, 1.0, 10), 1), index = None, placeholder = "Select local LLM Temperature...")
 if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
     st.session_state.model_chosen = sidebar_model_select
     st.session_state.model_temperature = sidebar_model_temperature
@@ -111,18 +104,12 @@ else:
     st.session_state.model_chosen = None
     st.session_state.model_temperature = None
 
-    
-
-
-#model = load_model("phi4:14b")
-#model.temperature = .7
 
 note_document = None
 
 databasedir = "./chrome_langchain_db"
 
-# if the database already exists, skip the upload. 
-# To do: allow for re-upload of notes via sidebar button
+# if the database already exists, skip the upload and allow for re-upload sidebar option 
 if has_subfolders(databasedir) and st.session_state.reupload_key == False:
     notes_uploaded = True
     update_key()
