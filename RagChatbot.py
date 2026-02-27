@@ -1,4 +1,5 @@
 from langchain_ollama import OllamaLLM
+import ollama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema.output_parser import StrOutputParser
 from streamlit_lottie import st_lottie
@@ -68,10 +69,6 @@ st.title("D&D Q&A Chatbot 🧙‍♂️")
 
 st.info("This app takes your notes from your campaign and passes relevant context from them along with your question to the local LLM. It does not store your notes or chat history. Please consult provided references as the AI may hallucinate.")
 
-# This should eventually be done dynamically
-model = load_model("phi4:14b")
-model.temperature = .7
-
 #Grab custom spinner animation
 with open("star-magic.json", "r",errors='ignore') as f:
     magic_spinner = json.load(f)
@@ -82,9 +79,43 @@ with open("Magical_Effect_Loading.json", "r",errors='ignore') as f:
 
 notes_uploaded = False
 
-if ("uploader_key" not in st.session_state) or ("reupload_key" not in st.session_state):
+if ("uploader_key" not in st.session_state) or ("reupload_key" not in st.session_state) or ("model_chosen" not in st.session_state) or ("model_temperature" not in st.session_state):
     st.session_state.uploader_key = 0
     st.session_state.reupload_key = 0
+    st.session_state.model_chosen = None 
+    st.session_state.model_temperature = None
+
+
+# This should eventually be done dynamically
+local_models = ollama.list()
+local_model_names = []
+for model in local_models.models:
+    local_model_names.append(model.model)
+
+#model = load_model("phi4:14b")
+#model.temperature = .7# This should eventually be done dynamically
+#local_models = ollama.list()
+#local_model_names = []
+#for model in local_models['models']:
+#    local_model_names.append(model['name'])
+
+# sidebar logic
+sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names, index = None, placeholder = "Select local LLM...")
+sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", (.1, .2, .3, .4, .5, .6, .7, .8, .9, 1), index = None, placeholder = "Select local LLM Temperature...")
+if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
+    st.session_state.model_chosen = sidebar_model_select
+    st.session_state.model_temperature = sidebar_model_temperature
+    model = load_model(st.session_state.model_chosen)
+    model.temperature = st.session_state.model_temperature
+else:
+    st.session_state.model_chosen = None
+    st.session_state.model_temperature = None
+
+    
+
+
+#model = load_model("phi4:14b")
+#model.temperature = .7
 
 note_document = None
 
@@ -95,6 +126,11 @@ databasedir = "./chrome_langchain_db"
 if has_subfolders(databasedir) and st.session_state.reupload_key == False:
     notes_uploaded = True
     update_key()
+    sidebar_button = st.sidebar.button('Re-Upload Notes')
+    if sidebar_button:
+        if os.path.exists(databasedir):
+            st.session_state.reupload_key = True
+            st.rerun()
 elif st.session_state.uploader_key == 0 or st.session_state.reupload_key == True:
     notes_uploaded = False
     placeholder = st.empty()
@@ -138,13 +174,7 @@ for message in st.session_state.messages:
                     st.button(buttoninfo[0], on_click = buttoninfo[1], args = buttoninfo[2], key = buttoninfo[3])
             i = i + 1
 
-if notes_uploaded:
-    sidebar_button = st.sidebar.button('Re-Upload Notes')
-    if sidebar_button:
-        if os.path.exists(databasedir):
-            st.session_state.reupload_key = True
-            st.rerun()
-            
+if notes_uploaded and (st.session_state.model_chosen is not None) and ((st.session_state.model_temperature is not None)):
     user_question = st.chat_input("Ask a question about the campaign...")
     if user_question:
         if completionmessage is not None:
