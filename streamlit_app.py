@@ -10,11 +10,11 @@ import streamlit as st
 import numpy as np
 
 #import local modules
-import CreateDatabase
+import src.utils.CreateDatabase as CreateDatabase
 
 # Local Function definitions 
 
-# Set up model
+# Load LLM
 @st.cache_resource
 def load_model(modelname):
     model = OllamaLLM(model=modelname)
@@ -40,7 +40,7 @@ def create_database_handler(document, databasedir, text_splitter, retriever, vec
         vectorization_progress = st.progress(0, text=progress_text)
     returnCode = None
     
-     # Use a manual loop to capture the return value from StopIteration
+     # Use a while loop to capture the return value from StopIteration
     while True:
         try:
             # Get the next yielded progress value
@@ -56,37 +56,47 @@ def update_key():
     if st.session_state.uploader_key is not None:
         st.session_state.uploader_key += 1
 
+# Define Streamlit dialog for reference content display
 @st.dialog("Reference Content")
 def reference_button(content):
     st.write(content)
 
+# Define a generator function to stream the response word by word with a small delay to simulate typing
 def stream_data(response):
     for word in response.split(" "):
         yield word + " "
         time.sleep(0.02)
 
-#Initialize Streamlit chat window 
-st.title("D&D Q&A Chatbot 🧙‍♂️")
+# Initialize Streamlit UI 
 
-st.info("This app takes your notes from your campaign and passes relevant context from them along with your question to the local LLM. It does not store your notes or chat history. Please consult provided references as the AI may hallucinate.")
+st.title("TTRPG Journal Q&A Chatbot 🧙‍♂️")
+
+st.info("This app takes your notes from your TTRPG campaign and passes your question along with relevant context from your notes to the local LLM. It does not permenantly store your notes or chat history or use them to train any model. Please consult provided references as the AI may hallucinate.")
 
 #Grab custom spinner animation
-with open("star-magic.json", "r",errors='ignore') as f:
+with open("assets/star-magic.json", "r",errors='ignore') as f:
     magic_spinner = json.load(f)
 
 #Grab custom file upload animation
-with open("Magical_Effect_Loading.json", "r",errors='ignore') as f:
+with open("assets/Magical_Effect_Loading.json", "r",errors='ignore') as f:
     magic_loader = json.load(f)
 
 notes_uploaded = False
 
+# Initialize session state variables for model and database upload handling
 if ("uploader_key" not in st.session_state) or ("reupload_key" not in st.session_state) or ("model_chosen" not in st.session_state) or ("model_temperature" not in st.session_state):
     st.session_state.uploader_key = 0
     st.session_state.reupload_key = 0
     st.session_state.model_chosen = None 
     st.session_state.model_temperature = None
 
-# Find local ollama models
+# Ff the chat history or button info does not exist in session state, or if the user opts to re-upload notes, initialize chat history, button info, and button key in session state
+if ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or (st.session_state.reupload_key == True):
+    st.session_state.messages = []
+    st.session_state.buttoninfo = []
+    st.session_state.button_key = 0
+
+# Find local ollama models 
 local_models = ollama.list()
 local_model_names = []
 for model in local_models.models:
@@ -107,7 +117,8 @@ else:
 
 note_document = None
 
-databasedir = "./chrome_langchain_db"
+# Database directory location
+databasedir = "database/chrome_langchain_db"
 
 # if the database already exists, skip the upload and allow for re-upload sidebar option 
 if has_subfolders(databasedir) and st.session_state.reupload_key == False:
@@ -118,6 +129,7 @@ if has_subfolders(databasedir) and st.session_state.reupload_key == False:
         if os.path.exists(databasedir):
             st.session_state.reupload_key = True
             st.rerun()
+# if the database does not exist, or the user opted to re-uplaod notes, have user upload notes and create database
 elif st.session_state.uploader_key == 0 or st.session_state.reupload_key == True:
     notes_uploaded = False
     placeholder = st.empty()
@@ -134,6 +146,8 @@ if note_document is not None:
     #get rid of the file uploader container once file has been selected
     st.session_state.reupload_key = 0
     placeholder.empty()
+    #Clear reupload key
+    st.session_state.reupload_key = False
     #start data upload and database creation animation
     notes_uploaded = create_database_handler(note_document, databasedir, text_splitter, retriever, vector_store)
     print(notes_uploaded)
@@ -143,12 +157,6 @@ if note_document is not None:
     else:
         completionmessage = st.empty()
         st.error("Failed to vectorize database. Check file existence or disk space.")
-
-# Initialize session state variables
-if ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or (st.session_state.reupload_key == True):
-    st.session_state.messages = []
-    st.session_state.buttoninfo = []
-    st.session_state.button_key = 0
 
 i = 0 #  represents index of references, each index can have multiple references and there is one per bot response
 # Display chat messages and references from history on app rerun
@@ -161,6 +169,7 @@ for message in st.session_state.messages:
                     st.button(buttoninfo[0], on_click = buttoninfo[1], args = buttoninfo[2], key = buttoninfo[3])
             i = i + 1
 
+#Chat logic, only runs if notes have been uploaded, a model has been chosen, and a model temperature has been set
 if notes_uploaded and (st.session_state.model_chosen is not None) and ((st.session_state.model_temperature is not None)):
     user_question = st.chat_input("Ask a question about the campaign...")
     if user_question:
