@@ -13,20 +13,19 @@ import numpy as np
 import src.utils.CreateDatabase as CreateDatabase
 
 # Initialize session state variables for model, database upload handling, and document retriever
-if ("uploader_key" not in st.session_state) or ("reupload_key" not in st.session_state) or ("model_chosen" not in st.session_state) or ("model_temperature" not in st.session_state) or ("document_retriever" not in st.session_state):
-    st.session_state.uploader_key = 0
+if ("reupload_key" not in st.session_state) or ("model_chosen" not in st.session_state) or ("model_temperature" not in st.session_state) or ("document_retriever" not in st.session_state):
     st.session_state.reupload_key = 0
     st.session_state.model_chosen = None 
     st.session_state.model_temperature = None
     st.session_state.notes_uploaded = False
     st.session_state.document_retriever = None
+    st.session_state.database_directory = "data//chrome_langchain_db"
 
 # If the chat history or button info does not exist in session state, or if the user opts to re-upload notes, initialize chat history, button info, and button key in session state
 if ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or (st.session_state.reupload_key == True):
     st.session_state.messages = []
     st.session_state.buttoninfo = []
     st.session_state.button_key = 0
-
 
 # Local Function definitions 
 
@@ -46,9 +45,9 @@ def has_subfolders(directory_path):
             return True
     return False
 
-def create_database_handler(document, databasedir, text_splitter, vector_store):
+def create_database_handler(document, text_splitter, vector_store):
     # Start database creation
-    gen = CreateDatabase.vectorize_note_document(document, databasedir, text_splitter, st.session_state.document_retriever, vector_store)
+    gen = CreateDatabase.vectorize_note_document(document, st.session_state.database_directory, text_splitter, st.session_state.document_retriever, vector_store)
 
     # Grab custom spinner animation
     with open("assets/Magical_Effect_Loading.json", "r",errors='ignore') as f:
@@ -72,10 +71,6 @@ def create_database_handler(document, databasedir, text_splitter, vector_store):
             animationplaceholder.empty()
             return returnCode
 
-def update_key():
-    if st.session_state.uploader_key is not None:
-        st.session_state.uploader_key += 1
-
 # Define a generator function to stream the response word by word with a small delay to simulate typing
 def stream_data(response):
     for word in response.split(" "):
@@ -85,11 +80,9 @@ def stream_data(response):
 # Check for new upload
 def process_model_options():
     # Find local ollama models 
-    local_models = ollama.list()
-    local_model_names = []
-    for model in local_models.models:
-        local_model_names.append(model.model)
+    local_model_names = [model.model for model in ollama.list().models]
 
+    
     sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names, index = None, placeholder = "Select local LLM...")
     sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", np.round(np.linspace(0.1, 1.0, 10), 1), index = None, placeholder = "Select local LLM Temperature...")
     if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
@@ -99,14 +92,13 @@ def process_model_options():
         st.session_state.model_chosen = None
         st.session_state.model_temperature = None
 
-def process_journal_options(data_base_directory):
+def process_journal_options():
     note_document = None
-    if has_subfolders(data_base_directory) and st.session_state.reupload_key == False:
+    if has_subfolders(st.session_state.database_directory) and st.session_state.reupload_key == False:
         st.session_state.notes_uploaded = True
-        update_key()
         sidebar_button = st.sidebar.button('Re-Upload Notes')
         if sidebar_button:
-            if os.path.exists(data_base_directory):
+            if os.path.exists(st.session_state.database_directory):
                 st.session_state.reupload_key = True
                 st.rerun()
 
@@ -119,18 +111,18 @@ def process_journal_options(data_base_directory):
             note_document = st.file_uploader("Upload your campaign notes")
 
     # Init text splitter, retriever, and vector database
-    text_splitter, st.session_state.document_retriever, vector_store = CreateDatabase.create_hf_retrival_artifacts(data_base_directory)
+    text_splitter, st.session_state.document_retriever, vector_store = CreateDatabase.create_hf_retrival_artifacts(st.session_state.database_directory)
 
     # Check to see if user uploaded notes
     completionmessage = None
     # Create vector database from file if file has been uploaded by user
     if note_document is not None:
-        #get rid of the file uploader container once file has been selected
+        #get rid of the file uploader container once file has been selecteds
         placeholder.empty()
         #Clear reupload key just in case
         st.session_state.reupload_key = False
         #start data upload and database creation animation
-        st.session_state.notes_uploaded = create_database_handler(note_document, databasedir, text_splitter, vector_store)
+        st.session_state.notes_uploaded = create_database_handler(note_document, text_splitter, vector_store)
         if(st.session_state.notes_uploaded == True):
             completionmessage = st.empty()
             st.success("Journal processed successfully!")
@@ -163,15 +155,13 @@ st.title("TTRPG Journal Q&A Chatbot 🧙‍♂️")
 
 st.info("This app takes your notes from your TTRPG campaign and passes your question along with relevant context from your notes to the local LLM. It does not permenantly store your notes or chat history or use them to train any model. Please consult provided references as the AI may hallucinate.")
 
-# Database directory location
-databasedir = "database/chrome_langchain_db"
-
+# Process model options provided by user in sidebar
 process_model_options() 
 
-# process journal options upon re-run, fetch retriver for journal and upload completion message
-completionmessage = process_journal_options(databasedir)
+# Process journal options provided by user
+completionmessage = process_journal_options()
 
-# Display chat history upon re-run
+# Update chat history in UI
 display_message_history()
 
 #Chat logic, only runs if notes have been uploaded, a model has been chosen, and a model temperature has been set
