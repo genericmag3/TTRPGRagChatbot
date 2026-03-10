@@ -28,7 +28,7 @@ def init_state_variables():
         st.session_state.messages = []
         st.session_state.buttoninfo = []
         st.session_state.button_key = 0
-        st.session_state.party_members = [{'id': str(uuid.uuid4()), 'name': ""}]
+        st.session_state.party_members = [{'id': str(uuid.uuid4()), 'name': "", 'note_taker': False}]
         st.session_state.delete_index = None
 
 def process_model_options():
@@ -54,7 +54,7 @@ def process_journal_options():
             m_id = member['id']
             
             # Name input and delete button columns
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
             with col1:  
                 new_name = st.text_input(
@@ -73,6 +73,8 @@ def process_journal_options():
                     on_click=delete_member,
                     args=(m_id,)
                 )
+            with col3:
+                st.checkbox(f"Note Taker", key=f"note_taker_{m_id}", help="Check if this party member is the note taker for processed notes.", on_change=toggle_note_taker, args=(m_id,))
             # Auto-update name when changed
             if new_name != member['name']:
                 member['name'] = new_name.strip()
@@ -123,6 +125,18 @@ def delete_member(member_id):
         m for m in st.session_state.party_members if m['id'] != member_id
     ]
 
+def toggle_note_taker(member_id):
+    # Find the member and toggle their note_taker status
+    if st.session_state['note_taker_' + member_id]:
+         for member in st.session_state.party_members:
+            if member['id'] == member_id:
+                member['note_taker'] = st.session_state['note_taker_' + member_id] 
+    else:
+        for member in st.session_state.party_members:
+            if member['id'] == member_id:
+                member['note_taker'] = False
+                break
+
 def update_message_history():
     i = 0 #  represents index of references, each index can have multiple references and there is one per bot response
     for message in st.session_state.messages:  
@@ -157,7 +171,7 @@ def process_chat():
                 ("system", "You are a helpful D&D adventure Q&A bot."),
                 ("user", "You are an expert in answering questions about a Dungeons and Dragons campaign described in provided documents. "
                 "The provided documents describe a campaign where the party members are {partymembers}. "
-                "Here are the relevant documents with a date and title from the character Brocc's perspective (sometimes in first person and sometimes in third person): " # Need to add note taker parameter to session state, have user specify which character is the note taker, and use it here instead of "Brocc"
+                "Here are the relevant documents from {notetaker}'s perspective (could be in first person or third person): " # Need to add note taker parameter to session state, have user specify which character is the note taker, and use it here instead of "Brocc"
                 "{notes} \n\n Here is the question to answer. Base your answer only off of the provided documents, and no other extraneous material. "
                 "Do not provide references to the documents.: {question}")
             ])
@@ -171,7 +185,8 @@ def process_chat():
             # Pass user query plus relevant notes to the model and get response if relevant notes are found
             if len(notes) > 0:
                 members = [member['name'] for member in st.session_state.party_members]
-                response = chain.invoke({"question": user_question, "partymembers": members, "notes": notes})  # Pass the query and relevant note documents
+                note_taker = [member['name'] for member in st.session_state.party_members if member['note_taker']]
+                response = chain.invoke({"question": user_question, "partymembers": members, "notes": notes, "notetaker": note_taker[0]})  # Pass the query and relevant note documents
                 placeholder.empty()
                 references_found = True
                 with st.chat_message("assistant", avatar="🧙‍♂️"):
@@ -262,15 +277,15 @@ def reference_button(content):
 
 # App execution
 
+#init state variables
 init_state_variables()
 
+#init streamlit UI
+st.title("TTRPG Journal Q&A Chatbot 🧙‍♂️")
+
+st.info("This app takes your notes from your TTRPG campaign and passes your question along with relevant context from your notes to the local LLM. It does not permenantly store your notes or chat history or use them to train any model. Please consult provided references as the AI may hallucinate.")
+
 if __name__ == "__main__":
-
-    # Initialize Streamlit UI 
-
-    st.title("TTRPG Journal Q&A Chatbot 🧙‍♂️")
-
-    st.info("This app takes your notes from your TTRPG campaign and passes your question along with relevant context from your notes to the local LLM. It does not permenantly store your notes or chat history or use them to train any model. Please consult provided references as the AI may hallucinate.")
 
     # Display queued notifications and clear old ones
     stn.notify()
@@ -278,7 +293,7 @@ if __name__ == "__main__":
     # Process model options provided by user in sidebar
     process_model_options() 
 
-    # Process journal provided by user
+    # Process journal options provided by user 
     process_journal_options()
 
     # Update chat history in UI
