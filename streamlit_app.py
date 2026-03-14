@@ -11,6 +11,7 @@ import streamlit_notify as stn
 import numpy as np
 import uuid
 import string
+import json
 
 #import local modules
 import src.utils.CreateDatabase as CreateDatabase
@@ -18,33 +19,64 @@ import src.utils.CreateDatabase as CreateDatabase
 # Local Function definitions 
 
 def init_state_variables():
-    # Initialize session state variables for model, database upload handling, and document retriever
-    if ("reupload_key" not in st.session_state) or ("model_chosen" not in st.session_state) or ("model_temperature" not in st.session_state) or ("document_retriever" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("database_directory" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state):
-        st.session_state.reupload_key = 0
-        st.session_state.model_chosen = None 
-        st.session_state.model_temperature = None
-        st.session_state.notes_uploaded = False
-        st.session_state.document_retriever = None
-        st.session_state.database_directory = "data//chrome_langchain_db"
-        st.session_state.messages = []
-        st.session_state.buttoninfo = []
-        st.session_state.button_key = 0
-        st.session_state.party_members = [{'id': str(uuid.uuid4()), 'name': "", 'note_taker': False}]
-        st.session_state.delete_index = None
+    # Initialize session state variables for model, database upload handling, and document retriever for storing in memory to avoid reload
+    if ("reupload_key" not in st.session_state) or ("model_name" not in st.session_state) or ("model_temperature" not in st.session_state) or ("document_retriever" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("database_directory" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state):
+        if os.path.isfile("data/user_data.json"):
+            with open("data/user_data.json", "r") as f:
+                user_data = json.load(f)
+            st.session_state.reupload_key = 0
+            st.session_state.model_name = user_data.get("model_name")
+            st.session_state.model_temperature = user_data.get("model_temperature")
+            st.session_state.notes_uploaded = user_data.get("notes_uploaded")
+            st.session_state.document_retriever = None
+            st.session_state.database_directory = "data//chrome_langchain_db"
+            st.session_state.messages = []
+            st.session_state.buttoninfo = []
+            st.session_state.button_key = 0
+            st.session_state.party_members = user_data.get("party_members")
+            st.session_state.delete_index = None
+            st.session_state.model = load_model(str(st.session_state.model_name))
+        # 1st run or missing user options data file, initialize session state variables to default values
+        else:
+            st.session_state.reupload_key = 0
+            st.session_state.model_name = None
+            st.session_state.model_temperature = None
+            st.session_state.notes_uploaded = False
+            st.session_state.document_retriever = None
+            st.session_state.database_directory = "data//chrome_langchain_db"
+            st.session_state.messages = []
+            st.session_state.buttoninfo = []
+            st.session_state.button_key = 0
+            st.session_state.party_members = [{'id': str(uuid.uuid4()), 'name': "", 'note_taker': False}]
+            st.session_state.delete_index = None
+            st.session_state.model = None
+
+def save_user_data():
+    user_data = {
+        "model_name": st.session_state.model_name,
+        "model_temperature": st.session_state.model_temperature,
+        "notes_uploaded": st.session_state.notes_uploaded,
+        "party_members": st.session_state.party_members
+    }
+    with open("data/user_data.json", "w") as f:
+        json.dump(user_data, f)
 
 def process_model_options():
     # Find local ollama models 
     local_model_names = [model.model for model in ollama.list().models]
+    temperature_options = np.round(np.linspace(0.1, 1.0, 10), 1)
     # Generate sidebar options
     with st.sidebar:
         st.header("🔧 Model Options")
-        sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names, index = None, placeholder = "Select local LLM...")
-        sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", np.round(np.linspace(0.1, 1.0, 10), 1), index = None, placeholder = "Select local LLM Temperature...")
+        sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names, placeholder = "Select local LLM...", index = local_model_names.index(st.session_state.model_name) if st.session_state.model_name in local_model_names else None)
+        sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", temperature_options, index = list(temperature_options).index(st.session_state.model_temperature) if st.session_state.model_temperature in temperature_options else None, placeholder = "Select local LLM Temperature...", )
         if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
-            st.session_state.model_chosen = load_model(sidebar_model_select)
-            st.session_state.model_chosen.temperature = sidebar_model_temperature
+            st.session_state.model_name = sidebar_model_select
+            st.session_state.model = load_model(sidebar_model_select)
+            st.session_state.model_temperature = sidebar_model_temperature
+            save_user_data()
         else:
-            st.session_state.model_chosen = None
+            st.session_state.model_name = None
             st.session_state.model_temperature = None
 
 def process_journal_options():
@@ -70,7 +102,7 @@ def process_journal_options():
             
             with col2: 
                 is_disabled = any_note_taker_selected and not member.get('note_taker', False)
-                st.checkbox(f"Note Taker", key=f"note_taker_{m_id}", help="Check if this party member is the note taker for processed notes.", on_change=toggle_note_taker, args=(m_id,), disabled=is_disabled)
+                st.checkbox(f"Note Taker", key=f"note_taker_{m_id}", help="Check if this party member is the note taker for processed notes.", on_change=toggle_note_taker, args=(m_id,), disabled=is_disabled, value=member.get('note_taker', True))
                 # Auto-update name when changed
                 if new_name != member['name']:
                     member['name'] = new_name.strip()
@@ -124,6 +156,7 @@ def process_journal_options():
         else:
             with st.toast("❌ Notes processing failed! Check disk space or existence of journal.", icon="🧙‍♂️"):
                 pass  # Optional: Add more details here
+    save_user_data()
 
 def delete_member(member_id):
     # Filter list to remove the specific ID
@@ -155,7 +188,7 @@ def update_message_history():
                 i = i + 1
 
 def process_chat():
-    if st.session_state.notes_uploaded and (st.session_state.model_chosen is not None):
+    if st.session_state.notes_uploaded and (st.session_state.model is not None):
         user_question = st.chat_input("Ask a question about the campaign...")
         if user_question:
             tempbuttoninfo = []
@@ -184,7 +217,7 @@ def process_chat():
             notes = st.session_state.document_retriever.invoke(user_question)
             chain = (
                 prompt
-                | st.session_state.model_chosen
+                | st.session_state.model
                 | StrOutputParser()
             )
 
@@ -196,7 +229,7 @@ def process_chat():
                 else:
                     formatted_members = ', '.join(members)
                 note_taker = [member['name'] for member in st.session_state.party_members if member.get('note_taker', False)][0]
-                response = chain.invoke({"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker[0]})  # Pass the query relevant note documents, party member names, and note taker name to the model
+                response = chain.invoke({"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
                 placeholder.empty()
                 references_found = True
                 with st.chat_message("assistant", avatar="🧙‍♂️"):
