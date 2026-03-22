@@ -7,37 +7,46 @@ import json
 import time
 import os
 import streamlit as st
-import streamlit_notify as stn
 import numpy as np
 import uuid
 import json
 
 #import local modules
-from ..utils import CreateDatabase as CreateDatabase
+#from ..utils import DatabaseHandler as DatabaseHandler
+from ..utils import DatabaseHandler
 
 class TTRPGChatbot:
     def __init__(self):
+        # constant class variables
+        self._DATABASEDIR = "data//chrome_langchain_db"
+        self._USERDATAFILE = "data//user_data.json"  
+
+        # init class datamembers
+        self.databasehandler = DatabaseHandler.DatabaseHandler() # Class should handle all interactions with the vector database, including creation, retrieval, and updates. Vector store instance should exist within this class.
+        #self.llmhandler = LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class. Public functions should be "load_model", and "process_query" which takes a user query and relevant notes as input and returns a response from the model.
+        
+        # init static chat window UI
         self.__init_UI()
+
+        # init state variables and handle any errors with user data file
         if (self.__init_state_variables() == False):
-            st.rerun() # retry initialization after handling error with user data file
+            st.rerun() # retry initialization after handling error
 
     def __init_state_variables(self):
         # Initialize session state variables for model, database upload handling, and document retriever for storing in memory to avoid reload
-        if ("reupload_key" not in st.session_state) or ("model_name" not in st.session_state) or ("model_temperature" not in st.session_state) or ("document_retriever" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("database_directory" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state):
-            if os.path.isfile("data/user_data.json"):
+        if ("reupload_key" not in st.session_state) or ("model_name" not in st.session_state) or ("model_temperature" not in st.session_state) or ("document_retriever" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state):
+            if os.path.isfile(self._USERDATAFILE):
                 try:
-                    with open("data/user_data.json", "r") as f:
+                    with open(self._USERDATAFILE, "r") as f:
                         user_data = json.load(f)
                 except Exception as e:
                     st.error(f"Error loading user data: {e}")
-                    os.remove("data/user_data.json")
+                    os.remove(self._USERDATAFILE)
                     return False
                 st.session_state.reupload_key = 0
                 st.session_state.model_name = user_data.get("model_name")
                 st.session_state.model_temperature = user_data.get("model_temperature")
                 st.session_state.notes_uploaded = user_data.get("notes_uploaded")
-                st.session_state.document_retriever = None
-                st.session_state.database_directory = "data//chrome_langchain_db"
                 st.session_state.messages = []
                 st.session_state.buttoninfo = []
                 st.session_state.button_key = 0
@@ -50,8 +59,6 @@ class TTRPGChatbot:
                 st.session_state.model_name = None
                 st.session_state.model_temperature = None
                 st.session_state.notes_uploaded = False
-                st.session_state.document_retriever = None
-                st.session_state.database_directory = "data//chrome_langchain_db"
                 st.session_state.messages = []
                 st.session_state.buttoninfo = []
                 st.session_state.button_key = 0
@@ -129,15 +136,14 @@ class TTRPGChatbot:
                     )
                 
             if st.button('➕ Add New Member', type='primary'):
-                st.session_state.party_members.append({'id': str(uuid.uuid4()), 'name': None})
+                st.session_state.party_members.append({'id': str(uuid.uuid4()), 'name': None}) # Can be functionalized
                 st.rerun()
             
         note_document = None
-        if self.__has_subfolders(st.session_state.database_directory) and (st.session_state.reupload_key == False):
+        if self.__has_subfolders(self._DATABASEDIR) and (st.session_state.reupload_key == False):
             st.session_state.notes_uploaded = True
             sidebar_button = st.sidebar.button('Re-Upload Notes')
             if sidebar_button:
-                #if os.path.exists(st.session_state.database_directory):
                 st.session_state.reupload_key = True
                 self.__reset_chat_history()
                 st.rerun()
@@ -149,7 +155,7 @@ class TTRPGChatbot:
             with placeholder.container():
                 note_document = st.file_uploader("Upload your campaign notes")
         # Init text splitter, retriever, and vector database
-        text_splitter, st.session_state.document_retriever, vector_store = CreateDatabase.create_hf_retrival_artifacts(st.session_state.database_directory)
+        self.databasehandler.create_retrival_artifacts(self._DATABASEDIR) 
         # Check to see if user uploaded notes
         if note_document is not None:
             #get rid of the file uploader container once file has been selected
@@ -157,7 +163,7 @@ class TTRPGChatbot:
             # Clear reupload key to allow for future re-uploads
             st.session_state.reupload_key = False
             #start data upload and database creation animation
-            st.session_state.notes_uploaded = self.__create_database_handler(note_document, text_splitter, vector_store)
+            st.session_state.notes_uploaded = self.__create_database_handler(note_document)
             if(st.session_state.notes_uploaded == True):
                 # Show confirmation toast notification when updated
                 with st.toast("📜🪶 Notes processed successfully!", icon="🧙‍♂️"):
@@ -167,9 +173,9 @@ class TTRPGChatbot:
                     pass  # Optional: Add more details here
         self.__save_user_data()
 
-    def __create_database_handler(self, document, text_splitter, vector_store):
+    def __create_database_handler(self, document):
         # Start database creation
-        gen = CreateDatabase.vectorize_note_document(document, st.session_state.database_directory, text_splitter, st.session_state.document_retriever, vector_store)
+        gen = self.databasehandler.generate_database(document, self._DATABASEDIR)
 
         # Grab custom spinner animation
         with open("assets/Magical_Effect_Loading.json", "r",errors='ignore') as f:
@@ -246,7 +252,7 @@ class TTRPGChatbot:
                     "\n\n Here is the question to answer: {question}. Base your answer only off of the provided documents and no extranious information. Do not provide references to the documents."
                     )
                 ])
-                notes = st.session_state.document_retriever.invoke(user_question)
+                notes = self.databasehandler.retrieve_notes(user_question) # retrieve relevant notes from the datababse based on the user query
                 chain = (
                     prompt
                     | st.session_state.model
@@ -261,7 +267,7 @@ class TTRPGChatbot:
                     else:
                         formatted_members = ', '.join(members)
                     note_taker = [member['name'] for member in st.session_state.party_members if member.get('note_taker', False)][0]
-                    response = chain.invoke({"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
+                    response =  chain.invoke({"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
                     placeholder.empty()
                     references_found = True
                     with st.chat_message("assistant", avatar="🧙‍♂️"):
