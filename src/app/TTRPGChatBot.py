@@ -1,29 +1,34 @@
-from langchain_ollama import OllamaLLM
-import ollama
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+import streamlit as st
 from streamlit_lottie import st_lottie
+from langchain_core.prompts import ChatPromptTemplate
 import json
 import time
 import os
-import streamlit as st
 import numpy as np
 import uuid
 import json
 
 #import local modules
-#from ..utils import DatabaseHandler as DatabaseHandler
 from ..utils import DatabaseHandler
+from ..utils import LLMHandler
 
 class TTRPGChatbot:
     def __init__(self):
         # constant class variables
         self._DATABASEDIR = "data//chrome_langchain_db"
-        self._USERDATAFILE = "data//user_data.json"  
+        self._USERDATAFILE = "data//user_data.json" 
+        self._PROMPTEMPLATE = ChatPromptTemplate.from_messages([
+                                ("system", "You are a helpful TTRPG adventure Q&A bot."),
+                                ("user", "You are an expert in answering questions about a TTRPG campaign described in provided documents. "
+                                "The provided documents describe a campaign where the party members (player characters) are {partymembers}. "
+                                "Here are the relevant documents from {notetaker}'s perspective (could be in first person or third person): {notes}"
+                                "\n\n Here is the question to answer: {question}. Base your answer only off of the provided documents and no extranious information. Do not provide references to the documents."
+                                )
+                            ])
 
         # init class datamembers
         self.databasehandler = DatabaseHandler.DatabaseHandler() # Class should handle all interactions with the vector database, including creation, retrieval, and updates. Vector store instance should exist within this class.
-        #self.llmhandler = LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class. Public functions should be "load_model", and "process_query" which takes a user query and relevant notes as input and returns a response from the model.
+        self.llmhandler = LLMHandler.LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class. 
         
         # init static chat window UI
         self.__init_UI()
@@ -52,7 +57,9 @@ class TTRPGChatbot:
                 st.session_state.button_key = 0
                 st.session_state.party_members = user_data.get("party_members")
                 st.session_state.delete_index = None
-                st.session_state.model = self.__load_model(str(st.session_state.model_name))
+                #st.session_state.model = self.__load_model(str(st.session_state.model_name))
+                if st.session_state.model_name is not None:
+                    self.llmhandler.load_model(str(st.session_state.model_name))
             # 1st run or missing user options data file, initialize session state variables to default values
             else:
                 st.session_state.reupload_key = 0
@@ -70,7 +77,7 @@ class TTRPGChatbot:
 
     def __process_model_options(self):
         # Find local ollama models 
-        local_model_names = [model.model for model in ollama.list().models]
+        local_model_names = [model.model for model in self.llmhandler.get_available_models()]
         temperature_options = np.round(np.linspace(0.1, 1.0, 10), 1)
         # Generate sidebar options
         with st.sidebar:
@@ -79,7 +86,8 @@ class TTRPGChatbot:
             sidebar_model_temperature = st.sidebar.selectbox("Select Model Temperature", temperature_options, index = list(temperature_options).index(st.session_state.model_temperature) if st.session_state.model_temperature in temperature_options else None, placeholder = "Select local LLM Temperature...", )
             if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
                 st.session_state.model_name = sidebar_model_select
-                st.session_state.model = self.__load_model(sidebar_model_select)
+                #st.session_state.model = self.__load_model(sidebar_model_select)
+                self.llmhandler.load_model(sidebar_model_select)
                 st.session_state.model_temperature = sidebar_model_temperature
                 self.__save_user_data()
             else:
@@ -226,7 +234,7 @@ class TTRPGChatbot:
                     i = i + 1
 
     def __process_chat(self):
-        if st.session_state.notes_uploaded and (st.session_state.model is not None):
+        if st.session_state.notes_uploaded and (st.session_state.model_name is not None):
             user_question = st.chat_input("Ask a question about the campaign...")
             if user_question:
                 tempbuttoninfo = []
@@ -243,21 +251,9 @@ class TTRPGChatbot:
                 # Display the animation initially
                 with placeholder.container():
                     st_lottie(magic_spinner, height=200, key="custom_spinner")
-
-                prompt = ChatPromptTemplate.from_messages([
-                    ("system", "You are a helpful TTRPG adventure Q&A bot."),
-                    ("user", "You are an expert in answering questions about a TTRPG campaign described in provided documents. "
-                    "The provided documents describe a campaign where the party members are {partymembers}. "
-                    "Here are the relevant documents from {notetaker}'s perspective (could be in first person or third person): {notes}"
-                    "\n\n Here is the question to answer: {question}. Base your answer only off of the provided documents and no extranious information. Do not provide references to the documents."
-                    )
-                ])
-                notes = self.databasehandler.retrieve_notes(user_question) # retrieve relevant notes from the datababse based on the user query
-                chain = (
-                    prompt
-                    | st.session_state.model
-                    | StrOutputParser()
-                )
+                
+                # retrieve relevant notes from the datababse based on the user query
+                notes = self.databasehandler.retrieve_notes(user_question) 
 
                 # Pass user query plus relevant notes to the model and get response if relevant notes are found
                 if len(notes) > 0:
@@ -267,7 +263,8 @@ class TTRPGChatbot:
                     else:
                         formatted_members = ', '.join(members)
                     note_taker = [member['name'] for member in st.session_state.party_members if member.get('note_taker', False)][0]
-                    response =  chain.invoke({"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
+                    response = self.llmhandler.invoke_model(self._PROMPTEMPLATE, {"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
+                    
                     placeholder.empty()
                     references_found = True
                     with st.chat_message("assistant", avatar="🧙‍♂️"):
@@ -325,11 +322,6 @@ class TTRPGChatbot:
                 if member['id'] == member_id:
                     member['note_taker'] = False
                     break
-
-    @st.cache_resource
-    def __load_model(_self,modelname):
-        model = OllamaLLM(model=modelname)
-        return model
     
     def __init_UI(self):
         st.title("TTRPG Journal Q&A Chatbot 🧙‍♂️")
