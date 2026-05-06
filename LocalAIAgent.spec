@@ -5,14 +5,8 @@ import sys ; sys.setrecursionlimit(sys.getrecursionlimit() * 5)
 #   python3 -m PyInstaller LocalAIAgent.spec
 #
 # Output: dist/LocalAIAgent/LocalAIAgent.exe  (plus supporting files)
-#
-# NOTE: The first build will be slow because PyInstaller analyses every
-# import. Subsequent builds reuse the cache and are faster.
-#
-# SIZE WARNING: This app bundles PyTorch (torch) which is several GB.
-# The final dist/ folder will be large. This is expected.
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 # ── Streamlit static assets (JS, CSS, icons, etc.) ────────────────────────
 st_datas, st_binaries, st_hiddenimports = collect_all("streamlit")
@@ -21,13 +15,20 @@ st_datas, st_binaries, st_hiddenimports = collect_all("streamlit")
 alt_datas, alt_binaries, alt_hiddenimports = collect_all("altair")
 
 # ── pyarrow — required by Streamlit's data serialisation ──────────────────
-arrow_datas, arrow_binaries, arrow_hiddenimports = collect_all("pyarrow")
+# Filter out arrow_flight (gRPC network transport) — not needed locally.
+arrow_datas, arrow_binaries_all, arrow_hiddenimports = collect_all("pyarrow")
+arrow_binaries = [
+    (src, dst) for src, dst in arrow_binaries_all
+    if "flight" not in src.lower()
+]
 
-# ── fastembed — lightweight ONNX-based embeddings (replaces torch + HF) ───
+# ── fastembed — ONNX-based embeddings, no PyTorch required ────────────────
 fe_datas, fe_binaries, fe_hiddenimports = collect_all("fastembed")
 
-# ── langchain_community — provides FastEmbedEmbeddings wrapper ────────────
-lcc_datas, lcc_binaries, lcc_hiddenimports = collect_all("langchain_community")
+# ── langchain_community — only collect data files; importing the full
+#    package via collect_all pulls in every optional integration (incl. torch).
+#    FastEmbedEmbeddings is declared as a hidden import instead.
+lcc_datas = collect_data_files("langchain_community")
 
 # ── chromadb — uses dynamic imports for telemetry and segment backends ────
 chroma_datas, chroma_binaries, chroma_hiddenimports = collect_all("chromadb")
@@ -47,11 +48,13 @@ extra_hiddenimports = [
     "langchain_core.prompts.chat",
     "langchain_ollama",
     "langchain_chroma",
-    "langchain_huggingface",
     "langchain_experimental",
     "langchain_experimental.text_splitter",
     "langchain.schema.output_parser",
     "langchain.docstore.document",
+    # ---- langchain_community (only the embedding we actually use) ----
+    "langchain_community.embeddings",
+    "langchain_community.embeddings.fastembed",
     # ---- vector store ----
     "chromadb",
     "chromadb.db.impl",
@@ -65,13 +68,8 @@ extra_hiddenimports = [
     "chromadb.segment.impl.vector.local_hnsw",
     # ---- embeddings ----
     "fastembed",
-    "langchain_community.embeddings",
-    "langchain_community.embeddings.fastembed",
-    # ---- document parsing ----
+    # ---- document parsing (CSV, DOCX, TXT only — no PDF) ----
     "docx",
-    "pdfplumber",
-    "pdfminer",
-    "pdfminer.high_level",
     # ---- data ----
     "pandas",
     "numpy",
@@ -88,31 +86,25 @@ extra_hiddenimports = [
 
 a = Analysis(
     ["launcher.py"],
-    pathex=["."],           # project root on the module search path
+    pathex=["."],
     binaries=[
         *st_binaries,
         *alt_binaries,
-        *arrow_binaries,
+        *arrow_binaries,        # flight-filtered
         *fe_binaries,
-        *lcc_binaries,
         *chroma_binaries,
+        # lcc_binaries omitted — langchain_community has no meaningful binaries
     ],
     datas=[
-        # ── Streamlit / Altair / Arrow bundled assets ──
         *st_datas,
         *alt_datas,
         *arrow_datas,
-        # ── fastembed + langchain_community ───────────
         *fe_datas,
         *lcc_datas,
         *chroma_datas,
-        # ── App source files ──────────────────────────
-        # These are placed in the root of dist/LocalAIAgent/ so that
-        # relative imports and file paths work out of the box.
         ("streamlit_app.py", "."),
-        ("src",              "src"),
-        ("assets",           "assets"),
-        # ── Streamlit lottie package data ─────────────
+        ("src",               "src"),
+        ("assets",            "assets"),
         *collect_data_files("streamlit_lottie"),
     ],
     hiddenimports=[
@@ -120,7 +112,6 @@ a = Analysis(
         *alt_hiddenimports,
         *arrow_hiddenimports,
         *fe_hiddenimports,
-        *lcc_hiddenimports,
         *chroma_hiddenimports,
         *extra_hiddenimports,
     ],
@@ -128,6 +119,19 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
+        # Hard-block packages that are no longer used but may be
+        # discovered transitively by PyInstaller's static analysis.
+        "torch",
+        "torchvision",
+        "torchaudio",
+        "transformers",
+        "sentence_transformers",
+        "langchain_huggingface",
+        # PDF libraries — app only handles CSV, DOCX, TXT
+        "pdfplumber",
+        "pdfminer",
+        "pypdfium2",
+        # Test frameworks
         "pytest",
         "_pytest",
     ],
@@ -145,14 +149,11 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,               # compress binaries (requires UPX to be installed)
-    # console=True  → keep the terminal open so startup errors are visible.
-    # Change to False once the app is stable for a cleaner end-user experience.
+    upx=True,
     console=True,
-    icon=None,              # set to e.g. "assets/icon.ico" if you add one
+    icon=None,
 )
 
-# --onedir layout: all files land in dist/LocalAIAgent/
 coll = COLLECT(
     exe,
     a.binaries,
