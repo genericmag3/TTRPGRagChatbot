@@ -1,10 +1,10 @@
 import sys ; sys.setrecursionlimit(sys.getrecursionlimit() * 5)
-# LocalAIAgent.spec  —  PyInstaller build configuration
+# TTRPGChatbot.spec  —  PyInstaller build configuration
 #
 # Build with:
-#   python3 -m PyInstaller LocalAIAgent.spec
+#   python3 -m PyInstaller TTRPGChatbot.spec
 #
-# Output: dist/LocalAIAgent/LocalAIAgent.exe  (plus supporting files)
+# Output: dist/TTRPGChatbot/TTRPGChatbot.exe  (plus supporting files)
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
@@ -145,7 +145,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="LocalAIAgent",
+    name="TTRPGChatbot",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -162,5 +162,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="LocalAIAgent",
+    name="TTRPGChatbot",
 )
