@@ -23,23 +23,11 @@ alt_datas, alt_binaries, alt_hiddenimports = collect_all("altair")
 # ── pyarrow — required by Streamlit's data serialisation ──────────────────
 arrow_datas, arrow_binaries, arrow_hiddenimports = collect_all("pyarrow")
 
-# ── sentence_transformers — used by HuggingFace embeddings ────────────────
-st_datas2, st_binaries2, st_hiddenimports2 = collect_all("sentence_transformers")
+# ── fastembed — lightweight ONNX-based embeddings (replaces torch + HF) ───
+fe_datas, fe_binaries, fe_hiddenimports = collect_all("fastembed")
 
-# ── transformers — sentence_transformers dependency ───────────────────────
-tf_datas, tf_binaries, tf_hiddenimports = collect_all("transformers")
-
-# ── torch — PyTorch; uses complex DLL loading that PyInstaller misses ─────
-torch_datas, torch_binaries, torch_hiddenimports = collect_all("torch")
-
-# ── tokenizers — HuggingFace fast tokenizer (Rust extension) ──────────────
-tok_datas, tok_binaries, tok_hiddenimports = collect_all("tokenizers")
-
-# ── huggingface_hub — model/cache management ──────────────────────────────
-hfhub_datas, hfhub_binaries, hfhub_hiddenimports = collect_all("huggingface_hub")
-
-# ── langchain_huggingface — wraps sentence_transformers for LangChain ─────
-lchf_datas, lchf_binaries, lchf_hiddenimports = collect_all("langchain_huggingface")
+# ── langchain_community — provides FastEmbedEmbeddings wrapper ────────────
+lcc_datas, lcc_binaries, lcc_hiddenimports = collect_all("langchain_community")
 
 # ── chromadb — uses dynamic imports for telemetry and segment backends ────
 chroma_datas, chroma_binaries, chroma_hiddenimports = collect_all("chromadb")
@@ -76,9 +64,9 @@ extra_hiddenimports = [
     "chromadb.segment.impl.vector.local_persistent_hnsw",
     "chromadb.segment.impl.vector.local_hnsw",
     # ---- embeddings ----
-    "sentence_transformers",
-    "huggingface_hub",
-    "tokenizers",
+    "fastembed",
+    "langchain_community.embeddings",
+    "langchain_community.embeddings.fastembed",
     # ---- document parsing ----
     "docx",
     "pdfplumber",
@@ -105,12 +93,8 @@ a = Analysis(
         *st_binaries,
         *alt_binaries,
         *arrow_binaries,
-        *st_binaries2,
-        *tf_binaries,
-        *torch_binaries,
-        *tok_binaries,
-        *hfhub_binaries,
-        *lchf_binaries,
+        *fe_binaries,
+        *lcc_binaries,
         *chroma_binaries,
     ],
     datas=[
@@ -118,13 +102,9 @@ a = Analysis(
         *st_datas,
         *alt_datas,
         *arrow_datas,
-        # ── sentence_transformers + transformers + torch ──
-        *st_datas2,
-        *tf_datas,
-        *torch_datas,
-        *tok_datas,
-        *hfhub_datas,
-        *lchf_datas,
+        # ── fastembed + langchain_community ───────────
+        *fe_datas,
+        *lcc_datas,
         *chroma_datas,
         # ── App source files ──────────────────────────
         # These are placed in the root of dist/LocalAIAgent/ so that
@@ -139,12 +119,8 @@ a = Analysis(
         *st_hiddenimports,
         *alt_hiddenimports,
         *arrow_hiddenimports,
-        *st_hiddenimports2,
-        *tf_hiddenimports,
-        *torch_hiddenimports,
-        *tok_hiddenimports,
-        *hfhub_hiddenimports,
-        *lchf_hiddenimports,
+        *fe_hiddenimports,
+        *lcc_hiddenimports,
         *chroma_hiddenimports,
         *extra_hiddenimports,
     ],

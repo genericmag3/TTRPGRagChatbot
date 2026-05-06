@@ -2,7 +2,7 @@ import pandas as pd
 from langchain_chroma import Chroma
 import re
 import io
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain.docstore.document import Document as langchaindoc
 from docx import Document as DocxReader
@@ -73,7 +73,7 @@ class DatabaseHandler:
                 )
         self.document_retriever = self.vector_store.as_retriever(
             search_type="similarity_score_threshold",
-            search_kwargs={"k": 10, "score_threshold": 0.1}
+            search_kwargs={"k": 10, "score_threshold": .32}
             )
 
     def __convert_document_into_dataframe(self, document, databasedir):
@@ -107,8 +107,7 @@ class DatabaseHandler:
 
 
     def __load_hf_embeddings(self):
-        embeddings = HuggingFaceEmbeddings(model_kwargs={"device": "cpu"}) # add check for cuda version and use 'cuda' if compatible?
-        return embeddings
+        return FastEmbedEmbeddings(model_name="BAAI/bge-base-en-v1.5")
 
     def __parse_journal_text(self,file_content):
         """Parses a text file with date headers into a structured list of dicts."""
