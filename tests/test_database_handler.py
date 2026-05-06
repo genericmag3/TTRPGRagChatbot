@@ -1,0 +1,218 @@
+"""Unit tests for DatabaseHandler — focuses on pure-Python logic that doesn't
+require real embeddings, a live Chroma DB, or HuggingFace models."""
+import io
+import pytest
+import pandas as pd
+from unittest.mock import MagicMock, patch
+
+from src.utils.DatabaseHandler import DatabaseHandler
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_text_file(content: str, name: str = "notes.txt") -> MagicMock:
+    """Return a mock that looks like a Streamlit UploadedFile for a text file."""
+    mock_file = MagicMock()
+    mock_file.name = name
+    mock_file.getvalue.return_value = content.encode("utf-8")
+    return mock_file
+
+
+def _make_csv_file(csv_text: str, name: str = "notes.csv") -> MagicMock:
+    mock_file = MagicMock()
+    mock_file.name = name
+    # pd.read_csv accepts a file-like object; forward reads to a StringIO
+    buf = io.StringIO(csv_text)
+    mock_file.read.side_effect = buf.read
+    mock_file.seek.side_effect = buf.seek
+    # Make the mock itself iterable / readable by pandas
+    mock_file.__iter__ = lambda s: iter(buf)
+    # Simplest approach: make it a real StringIO wrapped in mock attributes
+    real_buf = io.StringIO(csv_text)
+    mock_file.read = real_buf.read
+    return mock_file
+
+
+# ---------------------------------------------------------------------------
+# __parse_journal_text  (private, accessed via name-mangled attribute)
+# ---------------------------------------------------------------------------
+
+class TestParseJournalText:
+    def setup_method(self):
+        self.db = DatabaseHandler()
+        self.parse = self.db._DatabaseHandler__parse_journal_text
+
+    def test_iso_date_headers_split_entries(self):
+        text = "2023-10-27\nFirst entry content.\n2023-10-28\nSecond entry content."
+        df = self.parse(text)
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 2
+        assert df.iloc[0]["Date"] == "2023-10-27"
+        assert df.iloc[1]["Date"] == "2023-10-28"
+        assert "First entry content." in df.iloc[0]["Contents"]
+
+    def test_slash_date_headers(self):
+        text = "10/27/2023\nEntry one.\n11/1/23\nEntry two."
+        df = self.parse(text)
+        assert len(df) == 2
+        assert df.iloc[0]["Date"] == "10/27/2023"
+        assert df.iloc[1]["Date"] == "11/1/23"
+
+    def test_title_format(self):
+        text = "2024-01-01\nSome content."
+        df = self.parse(text)
+        assert df.iloc[0]["Title"] == "Entry for 2024-01-01"
+
+    def test_no_date_headers_returns_single_entry(self):
+        text = "This text has no date headers at all.\nJust regular lines."
+        df = self.parse(text)
+        # All content collected under the default "Unknown Date"
+        assert len(df) == 1
+        assert df.iloc[0]["Date"] == "Unknown Date"
+
+    def test_empty_string_returns_empty_dataframe(self):
+        df = self.parse("")
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 0
+
+    def test_multiline_entry_content_preserved(self):
+        text = "2023-05-01\nLine one.\nLine two.\nLine three.\n2023-05-02\nNext entry."
+        df = self.parse(text)
+        assert len(df) == 2
+        assert "Line two." in df.iloc[0]["Contents"]
+        assert "Line three." in df.iloc[0]["Contents"]
+
+    def test_real_txt_file(self):
+        """Smoke-test against the actual test fixture."""
+        import os
+        fixture = os.path.join(
+            os.path.dirname(__file__), "data", "testtextnotes.txt"
+        )
+        if not os.path.exists(fixture):
+            pytest.skip("Test fixture not found")
+        with open(fixture, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        df = self.parse(content)
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+
+
+# ---------------------------------------------------------------------------
+# retrieve_notes — before retriever is initialized
+# ---------------------------------------------------------------------------
+
+class TestRetrieveNotes:
+    def test_raises_when_retriever_not_initialized(self):
+        db = DatabaseHandler()
+        with pytest.raises(ValueError, match="not initialized"):
+            db.retrieve_notes("any query")
+
+    def test_delegates_to_retriever(self):
+        db = DatabaseHandler()
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = ["doc1", "doc2"]
+        db.document_retriever = mock_retriever
+        result = db.retrieve_notes("dragons")
+        mock_retriever.invoke.assert_called_once_with("dragons")
+        assert result == ["doc1", "doc2"]
+
+
+# ---------------------------------------------------------------------------
+# generate_database — with mocked splitter and vector store
+# ---------------------------------------------------------------------------
+
+class TestGenerateDatabase:
+    def setup_method(self):
+        self.db = DatabaseHandler()
+        # Inject mocked splitter and vector store
+        self.db.text_splitter = MagicMock()
+        self.db.text_splitter.split_text.return_value = ["chunk one", "chunk two"]
+        self.db.vector_store = MagicMock()
+
+    def test_returns_true_on_valid_csv(self):
+        csv_text = "Title,Date,Contents\nEntry 1,2023-01-01,Some content here\n"
+        mock_file = MagicMock()
+        mock_file.name = "notes.csv"
+        mock_file.read.return_value = csv_text.encode()
+        # Make pandas read the CSV from the mock
+        with patch("pandas.read_csv", return_value=pd.DataFrame({
+            "Title": ["Entry 1"],
+            "Date": ["2023-01-01"],
+            "Contents": ["Some content here"]
+        })):
+            gen = self.db.generate_database(mock_file, "data/test_db")
+            progress_values = []
+            ret = None
+            while True:
+                try:
+                    progress_values.append(next(gen))
+                except StopIteration as e:
+                    ret = e.value
+                    break
+        assert ret is True
+        assert len(progress_values) == 1  # one row → one yield
+        assert progress_values[0] == pytest.approx(100.0)
+
+    def test_returns_false_when_vector_store_is_none(self):
+        self.db.vector_store = None
+        with patch("pandas.read_csv", return_value=pd.DataFrame({
+            "Title": ["T"], "Date": ["2023-01-01"], "Contents": ["body"]
+        })):
+            mock_file = MagicMock()
+            mock_file.name = "notes.csv"
+            gen = self.db.generate_database(mock_file, "data/test_db")
+            ret = None
+            while True:
+                try:
+                    next(gen)
+                except StopIteration as e:
+                    ret = e.value
+                    break
+        assert ret is False
+
+    def test_returns_false_on_empty_dataframe(self):
+        with patch("pandas.read_csv", return_value=pd.DataFrame()):
+            mock_file = MagicMock()
+            mock_file.name = "notes.csv"
+            gen = self.db.generate_database(mock_file, "data/test_db")
+            ret = None
+            while True:
+                try:
+                    next(gen)
+                except StopIteration as e:
+                    ret = e.value
+                    break
+        assert ret is False
+
+
+# ---------------------------------------------------------------------------
+# __convert_document_into_dataframe — file-type dispatch
+# ---------------------------------------------------------------------------
+
+class TestConvertDocumentIntoDataframe:
+    def setup_method(self):
+        self.db = DatabaseHandler()
+        self.convert = self.db._DatabaseHandler__convert_document_into_dataframe
+
+    def test_txt_file_dispatches_to_parser(self):
+        content = "2023-01-01\nSome content.\n2023-01-02\nMore content."
+        mock_file = _make_text_file(content, "notes.txt")
+        df = self.convert(mock_file, "data/db")
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 2
+
+    def test_csv_file_reads_directly(self):
+        csv_text = "Title,Date,Contents\nSession 1,2023-01-01,First session\n"
+        buf = io.StringIO(csv_text)
+        with patch("pandas.read_csv", return_value=pd.DataFrame({
+            "Title": ["Session 1"],
+            "Date": ["2023-01-01"],
+            "Contents": ["First session"]
+        })) as mock_read:
+            mock_file = MagicMock()
+            mock_file.name = "notes.csv"
+            df = self.convert(mock_file, "data/db")
+            mock_read.assert_called_once()
+        assert len(df) == 1

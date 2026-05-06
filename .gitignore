@@ -8,11 +8,10 @@ chrome_langchain_db/6106e2b9-7284-4273-870c-0a4d346bb6c6/data_level0.bin
 chrome_langchain_db/6106e2b9-7284-4273-870c-0a4d346bb6c6/header.bin
 chrome_langchain_db/6106e2b9-7284-4273-870c-0a4d346bb6c6/length.bin
 chrome_langchain_db/6106e2b9-7284-4273-870c-0a4d346bb6c6/link_lists.bin
-Notes.csv
 __pycache__/CreateDatabase.cpython-310.pyc
-*.docx
-*.txt
 src/utils/__pycache__/
 database/
 data/
 __pycache__/
+dist/
+build/
