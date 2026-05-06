@@ -22,9 +22,14 @@ sys.modules["ollama"] = mock_ollama
 mock_langchain_ollama = MagicMock()
 sys.modules["langchain_ollama"] = mock_langchain_ollama
 
-# --- HuggingFace embeddings ---
-mock_hf = MagicMock()
-sys.modules["langchain_huggingface"] = mock_hf
+# --- FastEmbed embeddings (replaces HuggingFace) ---
+mock_fastembed = MagicMock()
+sys.modules["fastembed"] = mock_fastembed
+# langchain_community.embeddings.FastEmbedEmbeddings is imported at module level
+mock_lc_community = MagicMock()
+mock_lc_community.embeddings.FastEmbedEmbeddings = MagicMock()
+sys.modules["langchain_community"] = mock_lc_community
+sys.modules["langchain_community.embeddings"] = mock_lc_community.embeddings
 
 # --- Chroma vector store ---
 mock_chroma_mod = MagicMock()
@@ -39,7 +44,9 @@ sys.modules["langchain_experimental.text_splitter"] = mock_exp_splitter
 # --- streamlit_lottie ---
 sys.modules["streamlit_lottie"] = MagicMock()
 
-# --- torch / transformers (pulled in transitively) ---
-for heavy in ("torch", "torchvision", "transformers", "sentence_transformers"):
+# --- torch / transformers / HuggingFace (no longer used but may be
+#     pulled in transitively by other langchain packages) ---
+for heavy in ("torch", "torchvision", "transformers",
+              "sentence_transformers", "langchain_huggingface"):
     if heavy not in sys.modules:
         sys.modules[heavy] = MagicMock()
