@@ -150,8 +150,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
-    icon=None,
+    console=False,
+    icon="assets/icon.ico",
 )
 
 coll = COLLECT(
