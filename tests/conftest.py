@@ -4,6 +4,7 @@ AppTest runs in the same process, so sys.modules patches apply to the app too.
 """
 import sys
 import os
+import pytest
 from unittest.mock import MagicMock
 
 # Ensure project root is on path for absolute imports
@@ -50,3 +51,11 @@ for heavy in ("torch", "torchvision", "transformers",
               "sentence_transformers", "langchain_huggingface"):
     if heavy not in sys.modules:
         sys.modules[heavy] = MagicMock()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_data(tmp_path, monkeypatch):
+    """Redirect _USERDATAFILE to a temp path so tests never read/write production data."""
+    import src.app.TTRPGChatBot as chatbot_module
+    monkeypatch.setattr(chatbot_module.TTRPGChatbot, "_USERDATAFILE", str(tmp_path / "user_data_test.json"))
+    yield tmp_path
