@@ -13,10 +13,11 @@ from ..utils import DatabaseHandler
 from ..utils import LLMHandler
 
 class TTRPGChatbot:
+    _USERDATAFILE = "data//user_data.json"
+
     def __init__(self):
         # constant class variables
         self._DATABASEDIR = "data//chrome_langchain_db"
-        self._USERDATAFILE = "data//user_data.json" 
         self._PROMPTEMPLATE = ChatPromptTemplate.from_messages([
                                 ("system", "You are an expert in answering questions about a TTRPG campaign described in provided documents. "
                                 "The provided documents describe a campaign where the party members (player characters) are {partymembers}. "
@@ -106,7 +107,7 @@ class TTRPGChatbot:
             "notes_uploaded": st.session_state.notes_uploaded,
             "party_members": st.session_state.party_members
         }
-        with open("data/user_data.json", "w") as f:
+        with open(self._USERDATAFILE, "w") as f:
             json.dump(user_data, f)
 
     def __process_journal_options(self):

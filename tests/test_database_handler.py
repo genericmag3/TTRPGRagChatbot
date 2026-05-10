@@ -3,7 +3,7 @@ require real embeddings, a live Chroma DB, or HuggingFace models."""
 import io
 import pytest
 import pandas as pd
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from src.utils.DatabaseHandler import DatabaseHandler
 
@@ -216,3 +216,67 @@ class TestConvertDocumentIntoDataframe:
             df = self.convert(mock_file, "data/db")
             mock_read.assert_called_once()
         assert len(df) == 1
+
+
+# ---------------------------------------------------------------------------
+# create_retrival_artifacts — sets up embeddings, splitter, vector store, retriever
+# ---------------------------------------------------------------------------
+
+class TestCreateRetrivalArtifacts:
+    def setup_method(self):
+        self.db = DatabaseHandler()
+
+    def test_sets_text_splitter(self):
+        assert self.db.text_splitter is None
+        self.db.create_retrival_artifacts("data/test_db")
+        assert self.db.text_splitter is not None
+
+    def test_sets_vector_store(self):
+        assert self.db.vector_store is None
+        self.db.create_retrival_artifacts("data/test_db")
+        assert self.db.vector_store is not None
+
+    def test_sets_document_retriever(self):
+        assert self.db.document_retriever is None
+        self.db.create_retrival_artifacts("data/test_db")
+        assert self.db.document_retriever is not None
+
+    def test_chroma_called_with_correct_collection_and_directory(self):
+        with patch("src.utils.DatabaseHandler.Chroma") as mock_chroma:
+            self.db.create_retrival_artifacts("custom/db/path")
+        mock_chroma.assert_called_once_with(
+            collection_name="notes",
+            persist_directory="custom/db/path",
+            embedding_function=ANY,
+        )
+
+    def test_retriever_configured_with_similarity_score_threshold(self):
+        mock_store = MagicMock()
+        with patch("src.utils.DatabaseHandler.Chroma", return_value=mock_store):
+            self.db.create_retrival_artifacts("data/test_db")
+        mock_store.as_retriever.assert_called_once_with(
+            search_type="similarity_score_threshold",
+            search_kwargs={"k": 10, "score_threshold": 0.32},
+        )
+
+    def test_same_embeddings_instance_passed_to_splitter_and_chroma(self):
+        mock_embeddings = MagicMock()
+        with patch.object(
+            self.db, "_DatabaseHandler__load_hf_embeddings", return_value=mock_embeddings
+        ), patch("src.utils.DatabaseHandler.Chroma") as mock_chroma, \
+           patch("src.utils.DatabaseHandler.SemanticChunker") as mock_splitter:
+            self.db.create_retrival_artifacts("data/test_db")
+        mock_splitter.assert_called_once_with(mock_embeddings)
+        assert mock_chroma.call_args.kwargs["embedding_function"] is mock_embeddings
+
+    def test_retrieve_notes_works_after_initialization(self):
+        mock_doc = MagicMock()
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = [mock_doc]
+        mock_store = MagicMock()
+        mock_store.as_retriever.return_value = mock_retriever
+        with patch("src.utils.DatabaseHandler.Chroma", return_value=mock_store):
+            self.db.create_retrival_artifacts("data/test_db")
+        result = self.db.retrieve_notes("test query")
+        assert result == [mock_doc]
+        mock_retriever.invoke.assert_called_once_with("test query")
