@@ -1,7 +1,9 @@
+import os
 import pandas as pd
 from langchain_chroma import Chroma
 import re
 import io
+import shutil
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain.docstore.document import Document as langchaindoc
@@ -12,7 +14,7 @@ class DatabaseHandler:
         self.text_splitter = None
         self.document_retriever = None
         self.vector_store = None
-        pass
+        self.last_processed_df = None
     
     # function yeilds progress percent until final returncode
     def generate_database(self, document, databasedir):
@@ -20,6 +22,7 @@ class DatabaseHandler:
         retCode = True
 
         if df is not None and not df.empty:
+            self.last_processed_df = df
             documents = []
             idlist = []
             l = 0 
@@ -63,6 +66,14 @@ class DatabaseHandler:
         else:
             raise ValueError("Document retriever not initialized. Generate the retriver first with 'create_retrival_artifacts' method.")
     
+    def clear_database(self, databasedir):
+        if os.path.isdir(databasedir):
+            shutil.rmtree(databasedir)
+        self.text_splitter = None
+        self.document_retriever = None
+        self.vector_store = None
+        self.last_processed_df = None
+
     def create_retrival_artifacts(self, databasedir):
         hf_embeddings = self.__load_hf_embeddings()
         self.text_splitter = SemanticChunker(hf_embeddings)

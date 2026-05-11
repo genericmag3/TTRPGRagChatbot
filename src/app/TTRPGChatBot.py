@@ -6,11 +6,11 @@ import time
 import os
 import numpy as np
 import uuid
-import json
 
 #import local modules
 from ..utils import DatabaseHandler
 from ..utils import LLMHandler
+from ..utils import SummaryHandler
 
 class TTRPGChatbot:
     _USERDATAFILE = "data//user_data.json"
@@ -30,8 +30,9 @@ class TTRPGChatbot:
 
         # init class datamembers
         self.databasehandler = DatabaseHandler.DatabaseHandler() # Class should handle all interactions with the vector database, including creation, retrieval, and updates. Vector store instance should exist within this class.
-        self.llmhandler = LLMHandler.LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class. 
-        
+        self.llmhandler = LLMHandler.LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class.
+        self.summaryhandler = SummaryHandler.SummaryHandler(self.llmhandler)
+
         # init static chat window UI
         self.__init_UI()
 
@@ -41,7 +42,7 @@ class TTRPGChatbot:
 
     def __init_state_variables(self):
         # Initialize session state variables for model, database upload handling, and document retriever for storing in memory to avoid reload
-        if ("reupload_key" not in st.session_state) or ("model_name" not in st.session_state) or ("model_temperature" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or ("party_members" not in st.session_state) or ("delete_index" not in st.session_state):
+        if ("reupload_key" not in st.session_state) or ("model_name" not in st.session_state) or ("model_temperature" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or ("party_members" not in st.session_state) or ("delete_index" not in st.session_state) or ("summary_generated" not in st.session_state):
             if os.path.isfile(self._USERDATAFILE):
                 try:
                     with open(self._USERDATAFILE, "r") as f:
@@ -59,6 +60,7 @@ class TTRPGChatbot:
                 st.session_state.button_key = 0
                 st.session_state.party_members = user_data.get("party_members")
                 st.session_state.delete_index = None
+                st.session_state.summary_generated = self.summaryhandler.summary_exists()
                 if st.session_state.model_name is not None and st.session_state.model_temperature:
                     self.llmhandler.load_model(str(st.session_state.model_name), st.session_state.model_temperature)
             # 1st run or missing user options data file, initialize session state variables to default values
@@ -72,24 +74,25 @@ class TTRPGChatbot:
                 st.session_state.button_key = 0
                 st.session_state.party_members = [{'id': str(uuid.uuid4()), 'name': "", 'note_taker': False}]
                 st.session_state.delete_index = None
-        
+                st.session_state.summary_generated = self.summaryhandler.summary_exists()
+
         return True
 
     def __process_model_options(self):
-        # Find local ollama models 
+        # Find local ollama models
         local_model_names = [model.model for model in self.llmhandler.get_available_models()]
         temperature_options = np.round(np.linspace(0.1, 1.0, 10), 1)
         # Generate sidebar options
         with st.sidebar:
             st.header("🔧 Model Options")
-            sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names, 
-                                                        placeholder="Select local LLM...", 
+            sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names,
+                                                        placeholder="Select local LLM...",
                                                         index=local_model_names.index(st.session_state.model_name) if st.session_state.model_name in local_model_names else None)
-            sidebar_model_temperature = st.sidebar.slider("Select Model Temperature", 
-                                                        min_value=0.0, 
-                                                        max_value=1.0, 
-                                                        value=st.session_state.model_temperature if st.session_state.model_temperature is not None else 0.7, 
-                                                        step=0.1, 
+            sidebar_model_temperature = st.sidebar.slider("Select Model Temperature",
+                                                        min_value=0.0,
+                                                        max_value=1.0,
+                                                        value=st.session_state.model_temperature if st.session_state.model_temperature is not None else 0.7,
+                                                        step=0.1,
                                                         key="model_temperature_slider")
             if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
                 st.session_state.model_name = sidebar_model_select
@@ -99,7 +102,7 @@ class TTRPGChatbot:
             else:
                 st.session_state.model_name = None
                 st.session_state.model_temperature = None
-    
+
     def __save_user_data(self):
         user_data = {
             "model_name": st.session_state.model_name,
@@ -119,26 +122,26 @@ class TTRPGChatbot:
             # Iterate over the list party members
             for i, member in enumerate(st.session_state.party_members):
                 m_id = member['id']
-                
+
                 # Name input and delete button columns
                 col1, col2, col3 = st.columns(3)
-                
-                with col1:  
+
+                with col1:
                     new_name = st.text_input(
                         f"Member {i+1}",
                         key=f"input_{m_id}",
                         value=member['name'],
                         label_visibility="collapsed"  # Makes it more compact
                     )
-                
-                with col2: 
+
+                with col2:
                     is_disabled = any_note_taker_selected and not member.get('note_taker', False)
                     st.checkbox(f"Note Taker", key=f"note_taker_{m_id}", help="Check if this party member is the note taker for processed notes.", on_change=self.__toggle_note_taker, args=(m_id,), disabled=is_disabled, value=member.get('note_taker', True))
                     # Auto-update name when changed
                     if new_name != member['name']:
                         member['name'] = new_name.strip()
                         st.rerun()
-                
+
                 with col3:
                     st.button(
                         "🗑️",
@@ -148,51 +151,60 @@ class TTRPGChatbot:
                         on_click=self.__delete_member,
                         args=(m_id,)
                     )
-                
+
             if st.button('➕ Add New Member', type='primary'):
-                st.session_state.party_members.append({'id': str(uuid.uuid4()), 'name': None, 'note_taker': False}) 
+                st.session_state.party_members.append({'id': str(uuid.uuid4()), 'name': None, 'note_taker': False})
                 st.rerun()
-            
+
         note_document = None
+        model_ready = st.session_state.model_name is not None
+
         if self.__has_subfolders(self._DATABASEDIR) and (st.session_state.reupload_key == False):
             st.session_state.notes_uploaded = True
-            sidebar_button = st.sidebar.button('Re-Upload Notes')
+            sidebar_button = st.sidebar.button('Re-Upload Notes', disabled=not model_ready,
+                                               help="Select a model before re-uploading notes." if not model_ready else None)
             if sidebar_button:
+                self.databasehandler.clear_database(self._DATABASEDIR)
+                for stale in ("data/raw_notes.json", "data/campaign_summary.json"):
+                    if os.path.isfile(stale):
+                        os.remove(stale)
+                st.session_state.summary_generated = False
                 st.session_state.reupload_key = True
                 self.__reset_chat_history()
                 st.rerun()
-        # if the database does not exist, or the user opted to re-uplaod notes, have user upload notes and create database
+        # if the database does not exist, or the user opted to re-upload notes, have user upload notes and create database
         else:
             st.session_state.notes_uploaded = False
             placeholder = st.empty()
-            # Have user upload campaign notes
             with placeholder.container():
-                note_document = st.file_uploader("Upload your campaign notes")
+                if not model_ready:
+                    st.info("⚠️ Please select a model in **Model Options** before uploading campaign notes.")
+                else:
+                    note_document = st.file_uploader("Upload your campaign notes", type=["txt", "docx", "csv"])
         # Init text splitter, retriever, and vector database
-        self.databasehandler.create_retrival_artifacts(self._DATABASEDIR) 
+        self.databasehandler.create_retrival_artifacts(self._DATABASEDIR)
         # Check to see if user uploaded notes
         if note_document is not None:
-            #get rid of the file uploader container once file has been selected
             placeholder.empty()
-            # Clear reupload key to allow for future re-uploads
             st.session_state.reupload_key = False
-            #start data upload and database creation animation
             st.session_state.notes_uploaded = self.__create_database_handler(note_document)
-            if(st.session_state.notes_uploaded == True):
-                # Show confirmation toast notification when updated
+            if st.session_state.notes_uploaded:
                 with st.toast("📜🪶 Notes processed successfully!", icon="🧙‍♂️"):
-                    pass  # Optional: Add more details here
+                    pass
             else:
                 with st.toast("❌ Notes processing failed! Check disk space or existence of journal.", icon="🧙‍♂️"):
-                    pass  # Optional: Add more details here
+                    pass
+
+        if st.session_state.get("notes_uploaded"):
+            with st.sidebar:
+                st.page_link("pages/1_Campaign_Summary.py", label="Campaign Summary", icon="📖")
+
         self.__save_user_data()
 
     def __create_database_handler(self, document):
-        # Start database creation
         gen = self.databasehandler.generate_database(document, self._DATABASEDIR)
 
-        # Grab custom spinner animation
-        with open("assets/Magical_Effect_Loading.json", "r",errors='ignore') as f:
+        with open("assets/Magical_Effect_Loading.json", "r", errors='ignore') as f:
             magic_loader = json.load(f)
         animationplaceholder = st.empty()
         with animationplaceholder.container():
@@ -200,17 +212,25 @@ class TTRPGChatbot:
             progress_text = "Casting Vectorization Spell..."
             vectorization_progress = st.progress(0, text=progress_text)
         returnCode = None
-        
-        # Use a while loop to capture the return value from StopIteration
+
         while True:
             try:
-                # Get the next yielded progress value
                 progress = next(gen)
-                vectorization_progress.progress(progress / 100, text= progress_text + f"{progress:.1f}%")
+                vectorization_progress.progress(progress / 100, text=progress_text + f" {progress:.1f}%")
             except StopIteration as e:
                 returnCode = e.value
                 animationplaceholder.empty()
-                return returnCode
+                break
+
+        if not returnCode:
+            return returnCode
+
+        # Persist the raw notes DataFrame so the summary page and SummaryHandler can access it
+        if self.databasehandler.last_processed_df is not None:
+            os.makedirs("data", exist_ok=True)
+            self.databasehandler.last_processed_df.to_json("data/raw_notes.json")
+
+        return returnCode
 
 
     def __has_subfolders(self,directory_path):
@@ -221,7 +241,7 @@ class TTRPGChatbot:
             if os.path.isdir(item_path):
                 return True
         return False
-    
+
     def __reset_chat_history(self):
         st.session_state.messages = []
         st.session_state.buttoninfo = []
@@ -229,11 +249,11 @@ class TTRPGChatbot:
 
     def __update_message_history(self):
         i = 0 #  represents index of references, each index can have multiple references and there is one per bot response
-        for message in st.session_state.messages:  
+        for message in st.session_state.messages:
             with st.chat_message(message["role"], avatar=message["avatar"]):
                 st.markdown(message["content"])
                 if (message["role"] == "assistant"):
-                    if(st.session_state.buttoninfo[i] is not None): 
+                    if(st.session_state.buttoninfo[i] is not None):
                         for buttoninfo in st.session_state.buttoninfo[i]:
                             st.button(buttoninfo[0], on_click = buttoninfo[1], args = buttoninfo[2], key = buttoninfo[3])
                     i = i + 1
@@ -246,7 +266,7 @@ class TTRPGChatbot:
                 st.session_state.messages.append({"role": "user", "content": user_question,"avatar":None})
                 with st.chat_message("user"):
                     st.markdown(user_question)
-                
+
                 placeholder = st.empty()
 
                 # Load animation from json
@@ -256,9 +276,9 @@ class TTRPGChatbot:
                 # Display the animation initially
                 with placeholder.container():
                     st_lottie(magic_spinner, height=200, key="custom_spinner")
-                
+
                 # retrieve relevant notes from the datababse based on the user query
-                notes = self.databasehandler.retrieve_notes(user_question) 
+                notes = self.databasehandler.retrieve_notes(user_question)
 
                 # Pass user query plus relevant notes to the model and get response if relevant notes are found
                 if len(notes) > 0:
@@ -269,7 +289,7 @@ class TTRPGChatbot:
                         formatted_members = ', '.join(members)
                     note_taker = [member['name'] for member in st.session_state.party_members if member.get('note_taker', False)][0]
                     response = self.llmhandler.invoke_model(self._PROMPTEMPLATE, {"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
-                    
+
                     placeholder.empty()
                     references_found = True
                     with st.chat_message("assistant", avatar="🧙‍♂️"):
@@ -288,8 +308,8 @@ class TTRPGChatbot:
                                 # Generate new button key for next button
                                 st.session_state.button_key = st.session_state.button_key + 1
 
-                            # Add reference button information for the response to the session state            
-                            st.session_state.buttoninfo.append(tempbuttoninfo) 
+                            # Add reference button information for the response to the session state
+                            st.session_state.buttoninfo.append(tempbuttoninfo)
 
                 # Save canned response to chat history if no references
                 else:
@@ -303,13 +323,13 @@ class TTRPGChatbot:
     def __stream_data(self, response):
         for word in response.split(" "):
             yield word + " "
-            time.sleep(0.02) 
+            time.sleep(0.02)
 
     # Define Streamlit dialog for reference content display
     @st.dialog("Reference Content")
     def __reference_button(self, content):
         st.write(content)
-    
+
     def __delete_member(self, member_id):
         # Filter list to remove the specific ID
         st.session_state.party_members = [
@@ -321,13 +341,13 @@ class TTRPGChatbot:
         if st.session_state['note_taker_' + member_id]:
             for member in st.session_state.party_members:
                 if member['id'] == member_id:
-                    member['note_taker'] = st.session_state['note_taker_' + member_id] 
+                    member['note_taker'] = st.session_state['note_taker_' + member_id]
         else:
             for member in st.session_state.party_members:
                 if member['id'] == member_id:
                     member['note_taker'] = False
                     break
-    
+
     def __init_UI(self):
         st.title("TTRPG Journal Q&A Chatbot 🧙‍♂️")
         st.info("This app takes your notes from your TTRPG campaign and passes your question along with relevant context from your notes to the local LLM. It does not permanently store your notes or chat history or use them to train any model. Please consult provided references as the AI may hallucinate.")
