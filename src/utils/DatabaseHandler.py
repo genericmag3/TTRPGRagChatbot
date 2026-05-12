@@ -1,4 +1,6 @@
+import gc
 import os
+import time
 import pandas as pd
 from langchain_chroma import Chroma
 import re
@@ -67,21 +69,45 @@ class DatabaseHandler:
             raise ValueError("Document retriever not initialized. Generate the retriver first with 'create_retrival_artifacts' method.")
     
     def clear_database(self, databasedir):
-        if os.path.isdir(databasedir):
-            shutil.rmtree(databasedir)
-        self.text_splitter = None
         self.document_retriever = None
         self.vector_store = None
+        self.text_splitter = None
         self.last_processed_df = None
+        gc.collect()
+
+        if not os.path.isdir(databasedir):
+            return
+
+        for attempt in range(5):
+            try:
+                shutil.rmtree(databasedir)
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError:
+                if attempt < 4:
+                    time.sleep(0.3)
+                    gc.collect()
 
     def create_retrival_artifacts(self, databasedir):
+        if self.vector_store is not None:
+            return
         hf_embeddings = self.__load_hf_embeddings()
         self.text_splitter = SemanticChunker(hf_embeddings)
-        self.vector_store = Chroma(
-                collection_name="notes",
-                persist_directory=databasedir,
-                embedding_function=hf_embeddings
-                )
+        try:
+            self.vector_store = Chroma(
+                    collection_name="notes",
+                    persist_directory=databasedir,
+                    embedding_function=hf_embeddings
+                    )
+        except Exception:
+            if os.path.isdir(databasedir):
+                shutil.rmtree(databasedir, ignore_errors=True)
+            self.vector_store = Chroma(
+                    collection_name="notes",
+                    persist_directory=databasedir,
+                    embedding_function=hf_embeddings
+                    )
         self.document_retriever = self.vector_store.as_retriever(
             search_type="similarity_score_threshold",
             search_kwargs={"k": 10, "score_threshold": .32}

@@ -11,20 +11,14 @@ class CampaignSummarizer:
 
     def run(self):
         """Entry point for the campaign summary Streamlit page."""
-        self.__render_sidebar_nav()
-
         if not st.session_state.get("model_name"):
             st.title("📖 Campaign Summary")
             st.info("Please select a model in **Model Options** on the Q&A page before viewing the campaign summary.")
-            if chatbot_page := st.session_state.get("_chatbot_page"):
-                st.page_link(chatbot_page, label="Go to Q&A Chatbot", icon="💬")
             st.stop()
 
         if not self.summary_handler.raw_notes_exist():
             st.title("📖 Campaign Summary")
             st.info("No campaign notes found. Please upload your notes on the Q&A page first.")
-            if chatbot_page := st.session_state.get("_chatbot_page"):
-                st.page_link(chatbot_page, label="Go to Q&A Chatbot", icon="💬")
             st.stop()
 
         party_members = st.session_state.get("party_members", []) or []
@@ -32,8 +26,6 @@ class CampaignSummarizer:
         if not named_members:
             st.title("📖 Campaign Summary")
             st.info("Please define your party members on the Q&A page before generating a campaign summary.")
-            if chatbot_page := st.session_state.get("_chatbot_page"):
-                st.page_link(chatbot_page, label="Go to Q&A Chatbot", icon="💬")
             st.stop()
 
         existing = self.summary_handler.get_saved_summary()
@@ -48,18 +40,12 @@ class CampaignSummarizer:
             st.info("No campaign summary has been generated yet.")
             st.warning(
                 "Generating a summary may take several minutes depending on the length "
-                "of your notes and the speed of your model. Please be patient."
+                "of your notes and your hardware. Please be patient."
             )
             if not st.button("✨ Generate Campaign Summary", type="primary"):
                 st.stop()
 
         self.__generate_and_display()
-
-    def __render_sidebar_nav(self):
-        with st.sidebar:
-            if chatbot_page := st.session_state.get("_chatbot_page"):
-                st.page_link(chatbot_page, label="Q&A Chatbot", icon="💬")
-            st.divider()
 
     def __render_existing_summary(self, existing):
         generated_date = existing.get("generated_at", "")[:10]

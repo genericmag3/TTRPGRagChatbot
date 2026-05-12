@@ -24,6 +24,7 @@ _ALL_KEYS = {
     "button_key": 0,
     "party_members": [{"id": "init-abc", "name": "Alice", "note_taker": True}],
     "delete_index": None,
+    "summary_generated": False,
 }
 
 

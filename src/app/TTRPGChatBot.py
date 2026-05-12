@@ -29,7 +29,9 @@ class TTRPGChatbot:
                             ])
 
         # init class datamembers
-        self.databasehandler = DatabaseHandler.DatabaseHandler() # Class should handle all interactions with the vector database, including creation, retrieval, and updates. Vector store instance should exist within this class.
+        if 'databasehandler' not in st.session_state:
+            st.session_state.databasehandler = DatabaseHandler.DatabaseHandler()
+        self.databasehandler = st.session_state.databasehandler # Class should handle all interactions with the vector database, including creation, retrieval, and updates. Vector store instance should exist within this class.
         self.llmhandler = LLMHandler.LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class.
         self.summaryhandler = SummaryHandler.SummaryHandler(self.llmhandler)
 
@@ -191,13 +193,10 @@ class TTRPGChatbot:
             if st.session_state.notes_uploaded:
                 with st.toast("📜🪶 Notes processed successfully!", icon="🧙‍♂️"):
                     pass
+                st.toast("📖 A campaign summary is now available on the Campaign Summary page!", icon="📖")
             else:
                 with st.toast("❌ Notes processing failed! Check disk space or existence of journal.", icon="🧙‍♂️"):
                     pass
-
-        if st.session_state.get("notes_uploaded"):
-            with st.sidebar:
-                st.page_link("pages/1_Campaign_Summary.py", label="Campaign Summary", icon="📖")
 
         self.__save_user_data()
 
