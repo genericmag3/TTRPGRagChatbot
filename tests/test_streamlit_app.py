@@ -24,6 +24,7 @@ _ALL_KEYS = {
     "button_key": 0,
     "party_members": [{"id": "init-abc", "name": "Alice", "note_taker": True}],
     "delete_index": None,
+    "summary_generated": False,
 }
 
 
@@ -56,17 +57,17 @@ def _run_preloaded(**overrides) -> AppTest:
 
 
 def _db_patches():
-    """Return (isdir_fn, listdir_fn) that make __has_subfolders return True for the DB dir."""
-    real_isdir = os.path.isdir
-    real_listdir = os.listdir
+    """Return an isfile side_effect that simulates raw_notes.json existing (no user_data.json)."""
+    real_isfile = os.path.isfile
 
-    def _isdir(path):
-        return True if "chrome_langchain_db" in str(path) else real_isdir(path)
+    def _isfile(path):
+        if "raw_notes" in str(path):
+            return True
+        if "user_data" in str(path):
+            return False
+        return real_isfile(path)
 
-    def _listdir(path):
-        return ["subdir"] if "chrome_langchain_db" in str(path) else real_listdir(path)
-
-    return _isdir, _listdir
+    return _isfile
 
 
 def _run_app() -> AppTest:
@@ -317,29 +318,26 @@ class TestUpdateMessageHistory:
 # ---------------------------------------------------------------------------
 
 class TestReuploadButtonFlow:
-    def test_reupload_button_present_when_db_has_subfolders(self):
-        _isdir, _listdir = _db_patches()
+    def test_reupload_button_present_when_raw_notes_exist(self):
+        _isfile = _db_patches()
         at = AppTest.from_file(APP_PATH, default_timeout=TIMEOUT)
         for k, v in _ALL_KEYS.items():
             at.session_state[k] = v
-        with patch("os.path.isdir", side_effect=_isdir), \
-             patch("os.listdir", side_effect=_listdir), \
-             patch("os.path.isfile", side_effect=_hide_userdata_isfile()):
+        with patch("os.path.isfile", side_effect=_isfile):
             at.run()
         assert not at.exception
         labels = [b.label for b in at.sidebar.button]
         assert any("Re-Upload" in lbl for lbl in labels)
 
     def test_reupload_button_click_clears_chat_history(self):
-        _isdir, _listdir = _db_patches()
+        _isfile = _db_patches()
         at = AppTest.from_file(APP_PATH, default_timeout=TIMEOUT)
         for k, v in _ALL_KEYS.items():
             at.session_state[k] = v
         at.session_state["messages"] = [{"role": "user", "content": "old", "avatar": None}]
         at.session_state["button_key"] = 3
-        with patch("os.path.isdir", side_effect=_isdir), \
-             patch("os.listdir", side_effect=_listdir), \
-             patch("os.path.isfile", side_effect=_hide_userdata_isfile()):
+        with patch("os.path.isfile", side_effect=_isfile), \
+             patch("os.remove"):
             at.run()
             reupload = [b for b in at.sidebar.button if "Re-Upload" in b.label]
             assert len(reupload) == 1
@@ -356,7 +354,7 @@ class TestReuploadButtonFlow:
 class TestProcessChatFlow:
     def _boot_with_db(self, **state_overrides):
         """Start the app in a state where chat_input is visible."""
-        _isdir, _listdir = _db_patches()
+        _isfile = _db_patches()
         at = AppTest.from_file(APP_PATH, default_timeout=TIMEOUT)
         for k, v in _ALL_KEYS.items():
             at.session_state[k] = v
@@ -364,22 +362,18 @@ class TestProcessChatFlow:
         at.session_state["model_temperature"] = 0.7
         for k, v in state_overrides.items():
             at.session_state[k] = v
-        return at, _isdir, _listdir
+        return at, _isfile
 
     def test_chat_input_visible_when_notes_and_model_ready(self):
-        at, _isdir, _listdir = self._boot_with_db()
-        with patch("os.path.isdir", side_effect=_isdir), \
-             patch("os.listdir", side_effect=_listdir), \
-             patch("os.path.isfile", side_effect=_hide_userdata_isfile()):
+        at, _isfile = self._boot_with_db()
+        with patch("os.path.isfile", side_effect=_isfile):
             at.run()
         assert not at.exception
         assert len(at.chat_input) == 1
 
     def test_no_notes_found_appends_canned_response(self):
-        at, _isdir, _listdir = self._boot_with_db()
-        with patch("os.path.isdir", side_effect=_isdir), \
-             patch("os.listdir", side_effect=_listdir), \
-             patch("os.path.isfile", side_effect=_hide_userdata_isfile()):
+        at, _isfile = self._boot_with_db()
+        with patch("os.path.isfile", side_effect=_isfile):
             at.run()
             at.chat_input[0].set_value("What happened to the dragon?").run()
         assert not at.exception
@@ -390,10 +384,8 @@ class TestProcessChatFlow:
         assert "assistant" in roles
 
     def test_user_message_stored_in_session(self):
-        at, _isdir, _listdir = self._boot_with_db()
-        with patch("os.path.isdir", side_effect=_isdir), \
-             patch("os.listdir", side_effect=_listdir), \
-             patch("os.path.isfile", side_effect=_hide_userdata_isfile()):
+        at, _isfile = self._boot_with_db()
+        with patch("os.path.isfile", side_effect=_isfile):
             at.run()
             at.chat_input[0].set_value("Did the wizard survive?").run()
         assert not at.exception

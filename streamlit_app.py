@@ -1,8 +1,17 @@
-#import chatbot module
-import src.app.TTRPGChatBot as TTRPGChatBot
+import streamlit as st
+from src.app.TTRPGChatBot import TTRPGChatbot
+from src.app.CampaignSummarizer import CampaignSummarizer
 
-chatbot = TTRPGChatBot.TTRPGChatbot()
+st.set_page_config(page_title="TTRPG Campaign Assistant", page_icon="🧙‍♂️")
 
-if __name__ == "__main__":
+def _run_chatbot():
+    TTRPGChatbot().run()
 
-    chatbot.run()
+def _run_summarizer():
+    CampaignSummarizer().run()
+
+chatbot_page = st.Page(_run_chatbot, title="Q&A Chatbot", icon="💬")
+summary_page = st.Page(_run_summarizer, title="Campaign Summary", icon="📖")
+
+pg = st.navigation([chatbot_page, summary_page], position="sidebar")
+pg.run()

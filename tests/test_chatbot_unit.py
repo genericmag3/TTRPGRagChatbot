@@ -1,10 +1,12 @@
 """Pure unit tests for TTRPGChatbot class methods — no AppTest, no Streamlit runtime."""
 
+import json
 import os
 import pytest
 from unittest.mock import MagicMock, mock_open, patch
 
 from src.app.TTRPGChatBot import TTRPGChatbot
+from src.utils.DatabaseHandler import DATABASE_DIR
 
 
 class _SS(dict):
@@ -23,7 +25,7 @@ class _SS(dict):
 def _make_bot():
     """Instantiate TTRPGChatbot without running __init__ to avoid Streamlit and I/O."""
     bot = TTRPGChatbot.__new__(TTRPGChatbot)
-    bot._DATABASEDIR = "data//chrome_langchain_db"
+    bot._DATABASEDIR = DATABASE_DIR
     bot._USERDATAFILE = "data//user_data.json"
     bot._PROMPTEMPLATE = MagicMock()
     bot.databasehandler = MagicMock()
@@ -32,27 +34,48 @@ def _make_bot():
 
 
 # ---------------------------------------------------------------------------
-# __has_subfolders
+# __save_user_data — must preserve fields written by other pages
 # ---------------------------------------------------------------------------
 
-class TestHasSubfolders:
-    def test_nonexistent_path_returns_false(self, tmp_path):
-        bot = _make_bot()
-        assert bot._TTRPGChatbot__has_subfolders(str(tmp_path / "nonexistent")) is False
+class TestSaveUserData:
+    """__save_user_data must not erase summary_model fields set by CampaignSummarizer."""
 
-    def test_empty_directory_returns_false(self, tmp_path):
+    def test_preserves_summary_model_fields_when_file_has_them(self, tmp_path):
         bot = _make_bot()
-        assert bot._TTRPGChatbot__has_subfolders(str(tmp_path)) is False
+        data_file = tmp_path / "user_data.json"
+        data_file.write_text(json.dumps({
+            "summary_model_name": "mistral",
+            "summary_model_temperature": 0.3,
+        }))
+        bot._USERDATAFILE = str(data_file)
+        ss = _SS(
+            model_name="llama3:latest",
+            model_temperature=0.7,
+            notes_uploaded=True,
+            party_members=[{"id": "1", "name": "Aria", "note_taker": True}],
+        )
+        with patch("streamlit.session_state", ss):
+            bot._TTRPGChatbot__save_user_data()
+        saved = json.loads(data_file.read_text())
+        assert saved["summary_model_name"] == "mistral"
+        assert saved["summary_model_temperature"] == 0.3
+        assert saved["model_name"] == "llama3:latest"
 
-    def test_directory_with_files_only_returns_false(self, tmp_path):
-        (tmp_path / "file.txt").write_text("data")
+    def test_writes_qa_fields_when_no_prior_file(self, tmp_path):
         bot = _make_bot()
-        assert bot._TTRPGChatbot__has_subfolders(str(tmp_path)) is False
-
-    def test_directory_with_subfolder_returns_true(self, tmp_path):
-        (tmp_path / "subdir").mkdir()
-        bot = _make_bot()
-        assert bot._TTRPGChatbot__has_subfolders(str(tmp_path)) is True
+        data_file = tmp_path / "user_data.json"
+        bot._USERDATAFILE = str(data_file)
+        ss = _SS(
+            model_name="llama3:latest",
+            model_temperature=0.5,
+            notes_uploaded=False,
+            party_members=[],
+        )
+        with patch("streamlit.session_state", ss):
+            bot._TTRPGChatbot__save_user_data()
+        saved = json.loads(data_file.read_text())
+        assert saved["model_name"] == "llama3:latest"
+        assert saved["notes_uploaded"] is False
 
 
 # ---------------------------------------------------------------------------

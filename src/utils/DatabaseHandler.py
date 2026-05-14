@@ -1,18 +1,25 @@
+import gc
+import os
+import time
 import pandas as pd
 from langchain_chroma import Chroma
 import re
 import io
+import shutil
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain.docstore.document import Document as langchaindoc
 from docx import Document as DocxReader
+
+DATABASE_DIR = "data/chrome_langchain_db"
+
 
 class DatabaseHandler:
     def __init__(self):
         self.text_splitter = None
         self.document_retriever = None
         self.vector_store = None
-        pass
+        self.last_processed_df = None
     
     # function yeilds progress percent until final returncode
     def generate_database(self, document, databasedir):
@@ -20,6 +27,7 @@ class DatabaseHandler:
         retCode = True
 
         if df is not None and not df.empty:
+            self.last_processed_df = df
             documents = []
             idlist = []
             l = 0 
@@ -63,14 +71,54 @@ class DatabaseHandler:
         else:
             raise ValueError("Document retriever not initialized. Generate the retriver first with 'create_retrival_artifacts' method.")
     
+    def clear_database(self, databasedir):
+        self.document_retriever = None
+        self.vector_store = None
+        self.text_splitter = None
+        self.last_processed_df = None
+        gc.collect()
+
+        if not os.path.isdir(databasedir):
+            return
+
+        for attempt in range(5):
+            try:
+                shutil.rmtree(databasedir)
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError:
+                if attempt < 4:
+                    time.sleep(0.3)
+                    gc.collect()
+
     def create_retrival_artifacts(self, databasedir):
-        hf_embeddings = self.__load_hf_embeddings()
-        self.text_splitter = SemanticChunker(hf_embeddings)
-        self.vector_store = Chroma(
-                collection_name="notes",
-                persist_directory=databasedir,
-                embedding_function=hf_embeddings
-                )
+        if self.vector_store is not None:
+            return
+        embeddings = self.__load_embeddings()
+        self.text_splitter = SemanticChunker(embeddings)
+        try:
+            self.vector_store = Chroma(
+                    collection_name="notes",
+                    persist_directory=databasedir,
+                    embedding_function=embeddings
+                    )
+        except Exception:
+            gc.collect()
+            for attempt in range(5):
+                try:
+                    if os.path.isdir(databasedir):
+                        shutil.rmtree(databasedir)
+                    break
+                except (FileNotFoundError, PermissionError):
+                    if attempt < 4:
+                        time.sleep(0.3)
+                        gc.collect()
+            self.vector_store = Chroma(
+                    collection_name="notes",
+                    persist_directory=databasedir,
+                    embedding_function=embeddings
+                    )
         self.document_retriever = self.vector_store.as_retriever(
             search_type="similarity_score_threshold",
             search_kwargs={"k": 10, "score_threshold": .32}
@@ -106,7 +154,7 @@ class DatabaseHandler:
         return df
 
 
-    def __load_hf_embeddings(self):
+    def __load_embeddings(self):
         return FastEmbedEmbeddings(model_name="BAAI/bge-base-en-v1.5")
 
     def __parse_journal_text(self,file_content):
