@@ -1,5 +1,6 @@
 """Unit tests for CampaignSummarizer — Streamlit calls are mocked."""
 
+import json
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -29,6 +30,48 @@ def _make_summarizer():
     cs.llm_handler = MagicMock()
     cs.summary_handler = MagicMock()
     return cs
+
+
+# ---------------------------------------------------------------------------
+# __init_state_variables — party_members persistence
+# ---------------------------------------------------------------------------
+
+class TestInitStateVariables:
+    """__init_state_variables must load party_members from user data when absent from session."""
+
+    def test_loads_party_members_from_file_when_absent_from_session(self, tmp_path):
+        cs = _make_summarizer()
+        saved_members = [{"id": "1", "name": "Aria", "note_taker": True}]
+        data_file = tmp_path / "user_data.json"
+        data_file.write_text(json.dumps({
+            "summary_model_name": "llama3:latest",
+            "summary_model_temperature": 0.5,
+            "party_members": saved_members,
+        }))
+        cs._USERDATAFILE = str(data_file)
+        ss = _SS()
+        with patch("streamlit.session_state", ss):
+            cs._CampaignSummarizer__init_state_variables()
+        assert ss.get("party_members") == saved_members
+
+    def test_party_members_defaults_to_empty_list_when_file_absent(self, tmp_path):
+        cs = _make_summarizer()
+        cs._USERDATAFILE = str(tmp_path / "nonexistent.json")
+        ss = _SS()
+        with patch("streamlit.session_state", ss):
+            cs._CampaignSummarizer__init_state_variables()
+        assert ss.get("party_members") == []
+
+    def test_does_not_overwrite_party_members_already_in_session(self, tmp_path):
+        cs = _make_summarizer()
+        existing = [{"id": "99", "name": "Veteran", "note_taker": False}]
+        data_file = tmp_path / "user_data.json"
+        data_file.write_text(json.dumps({"party_members": [{"id": "1", "name": "Aria", "note_taker": True}]}))
+        cs._USERDATAFILE = str(data_file)
+        ss = _SS(party_members=existing)
+        with patch("streamlit.session_state", ss):
+            cs._CampaignSummarizer__init_state_variables()
+        assert ss.get("party_members") == existing
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +122,9 @@ class TestRunPartyMemberGate:
         """Run cs.run() expecting it to hit st.stop(); capture what st.info was called with."""
         info_calls = []
         with patch("streamlit.session_state", ss), \
+             patch.object(cs, "_CampaignSummarizer__init_state_variables"), \
+             patch.object(cs, "_CampaignSummarizer__process_model_options"), \
+             patch.object(cs, "_notes_in_database", return_value=True), \
              patch("streamlit.title"), \
              patch("streamlit.info", side_effect=lambda msg: info_calls.append(msg)), \
              patch("streamlit.page_link"), \
@@ -95,7 +141,7 @@ class TestRunPartyMemberGate:
         cs = _make_summarizer()
         cs.summary_handler.raw_notes_exist.return_value = True
         cs.summary_handler.get_saved_summary.return_value = None
-        ss = _SS(model_name="llama3:latest", party_members=[])
+        ss = _SS(summary_model_name="llama3:latest", party_members=[])
         info_calls = self._run_to_stop(cs, ss)
         assert any("party member" in msg.lower() for msg in info_calls)
 
@@ -103,7 +149,7 @@ class TestRunPartyMemberGate:
         cs = _make_summarizer()
         cs.summary_handler.raw_notes_exist.return_value = True
         cs.summary_handler.get_saved_summary.return_value = None
-        ss = _SS(model_name="llama3:latest", party_members=[
+        ss = _SS(summary_model_name="llama3:latest", party_members=[
             {"id": "1", "name": "", "note_taker": False},
             {"id": "2", "name": "   ", "note_taker": False},
         ])
@@ -114,7 +160,7 @@ class TestRunPartyMemberGate:
         cs = _make_summarizer()
         cs.summary_handler.raw_notes_exist.return_value = True
         cs.summary_handler.get_saved_summary.return_value = None
-        ss = _SS(model_name="llama3:latest")
+        ss = _SS(summary_model_name="llama3:latest")
         info_calls = self._run_to_stop(cs, ss)
         assert any("party member" in msg.lower() for msg in info_calls)
 
@@ -123,12 +169,15 @@ class TestRunPartyMemberGate:
         cs.summary_handler.raw_notes_exist.return_value = True
         cs.summary_handler.get_saved_summary.return_value = None
         ss = _SS(
-            model_name="llama3:latest",
+            summary_model_name="llama3:latest",
             party_members=[{"id": "1", "name": "Aria", "note_taker": True}],
         )
         button_called = []
         warning_called = []
         with patch("streamlit.session_state", ss), \
+             patch.object(cs, "_CampaignSummarizer__init_state_variables"), \
+             patch.object(cs, "_CampaignSummarizer__process_model_options"), \
+             patch.object(cs, "_notes_in_database", return_value=True), \
              patch("streamlit.title"), \
              patch("streamlit.info"), \
              patch("streamlit.warning", side_effect=lambda msg: warning_called.append(msg)), \
@@ -153,11 +202,14 @@ class TestRunTimeWarning:
         cs.summary_handler.raw_notes_exist.return_value = True
         cs.summary_handler.get_saved_summary.return_value = None
         ss = _SS(
-            model_name="llama3:latest",
+            summary_model_name="llama3:latest",
             party_members=[{"id": "1", "name": "Aria", "note_taker": True}],
         )
         warning_calls = []
         with patch("streamlit.session_state", ss), \
+             patch.object(cs, "_CampaignSummarizer__init_state_variables"), \
+             patch.object(cs, "_CampaignSummarizer__process_model_options"), \
+             patch.object(cs, "_notes_in_database", return_value=True), \
              patch("streamlit.title"), \
              patch("streamlit.info"), \
              patch("streamlit.warning", side_effect=lambda msg: warning_calls.append(msg)), \
@@ -205,8 +257,8 @@ class TestGenerateAndDisplay:
         cs.llm_handler.load_model.return_value = None
         party = [{"id": "1", "name": "Aria", "note_taker": True}]
         ss = _SS(
-            model_name="llama3:latest",
-            model_temperature=0.7,
+            summary_model_name="llama3:latest",
+            summary_model_temperature=0.7,
             party_members=party,
         )
         self._run_generate(cs, ss, [(False, 50, "Working..."), (True, 100, "Done")])
@@ -218,10 +270,69 @@ class TestGenerateAndDisplay:
         cs = _make_summarizer()
         cs.llm_handler.load_model.return_value = None
         ss = _SS(
-            model_name="llama3:latest",
-            model_temperature=0.7,
+            summary_model_name="llama3:latest",
+            summary_model_temperature=0.7,
             party_members=[{"id": "1", "name": "Aria", "note_taker": True}],
             summary_generated=False,
         )
         self._run_generate(cs, ss, [(False, 50, "Working..."), (True, 100, "Done")])
         assert ss.get("summary_generated") is True
+
+
+# ---------------------------------------------------------------------------
+# Persistence — existing summary bypasses all generation prerequisites
+# ---------------------------------------------------------------------------
+
+_SAVED_SUMMARY = {
+    "summary": "The campaign so far.",
+    "model": "llama3:latest",
+    "generated_at": "2026-01-01T00:00:00",
+}
+
+
+class TestSummaryPersistence:
+    """A saved summary must be displayed without requiring notes, raw notes, or party members."""
+
+    def _run_expecting_render(self, cs, ss):
+        """Return True if __render_existing_summary was called."""
+        render_called = []
+        with patch("streamlit.session_state", ss), \
+             patch.object(cs, "_CampaignSummarizer__init_state_variables"), \
+             patch.object(cs, "_CampaignSummarizer__process_model_options"), \
+             patch.object(cs, "_CampaignSummarizer__render_existing_summary",
+                          side_effect=lambda s: render_called.append(s)), \
+             patch("streamlit.stop", side_effect=StopIteration):
+            try:
+                cs.run()
+            except StopIteration:
+                pass
+        return bool(render_called)
+
+    def test_shows_summary_when_no_model_selected(self):
+        cs = _make_summarizer()
+        cs.summary_handler.get_saved_summary.return_value = _SAVED_SUMMARY
+        ss = _SS(summary_model_name=None, party_members=[])
+        assert self._run_expecting_render(cs, ss)
+
+    def test_shows_summary_when_notes_not_in_database(self):
+        cs = _make_summarizer()
+        cs.summary_handler.get_saved_summary.return_value = _SAVED_SUMMARY
+        with patch.object(cs, "_notes_in_database", return_value=False):
+            ss = _SS(summary_model_name="llama3:latest", party_members=[])
+            assert self._run_expecting_render(cs, ss)
+
+    def test_shows_summary_when_raw_notes_missing(self):
+        cs = _make_summarizer()
+        cs.summary_handler.get_saved_summary.return_value = _SAVED_SUMMARY
+        cs.summary_handler.raw_notes_exist.return_value = False
+        with patch.object(cs, "_notes_in_database", return_value=True):
+            ss = _SS(summary_model_name="llama3:latest", party_members=[])
+            assert self._run_expecting_render(cs, ss)
+
+    def test_shows_summary_when_no_named_party_members(self):
+        cs = _make_summarizer()
+        cs.summary_handler.get_saved_summary.return_value = _SAVED_SUMMARY
+        cs.summary_handler.raw_notes_exist.return_value = True
+        with patch.object(cs, "_notes_in_database", return_value=True):
+            ss = _SS(summary_model_name="llama3:latest", party_members=[])
+            assert self._run_expecting_render(cs, ss)

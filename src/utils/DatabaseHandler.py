@@ -11,6 +11,9 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain.docstore.document import Document as langchaindoc
 from docx import Document as DocxReader
 
+DATABASE_DIR = "data/chrome_langchain_db"
+
+
 class DatabaseHandler:
     def __init__(self):
         self.text_splitter = None
@@ -92,21 +95,29 @@ class DatabaseHandler:
     def create_retrival_artifacts(self, databasedir):
         if self.vector_store is not None:
             return
-        hf_embeddings = self.__load_hf_embeddings()
-        self.text_splitter = SemanticChunker(hf_embeddings)
+        embeddings = self.__load_embeddings()
+        self.text_splitter = SemanticChunker(embeddings)
         try:
             self.vector_store = Chroma(
                     collection_name="notes",
                     persist_directory=databasedir,
-                    embedding_function=hf_embeddings
+                    embedding_function=embeddings
                     )
         except Exception:
-            if os.path.isdir(databasedir):
-                shutil.rmtree(databasedir, ignore_errors=True)
+            gc.collect()
+            for attempt in range(5):
+                try:
+                    if os.path.isdir(databasedir):
+                        shutil.rmtree(databasedir)
+                    break
+                except (FileNotFoundError, PermissionError):
+                    if attempt < 4:
+                        time.sleep(0.3)
+                        gc.collect()
             self.vector_store = Chroma(
                     collection_name="notes",
                     persist_directory=databasedir,
-                    embedding_function=hf_embeddings
+                    embedding_function=embeddings
                     )
         self.document_retriever = self.vector_store.as_retriever(
             search_type="similarity_score_threshold",
@@ -143,7 +154,7 @@ class DatabaseHandler:
         return df
 
 
-    def __load_hf_embeddings(self):
+    def __load_embeddings(self):
         return FastEmbedEmbeddings(model_name="BAAI/bge-base-en-v1.5")
 
     def __parse_journal_text(self,file_content):

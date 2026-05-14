@@ -17,7 +17,7 @@ class TTRPGChatbot:
 
     def __init__(self):
         # constant class variables
-        self._DATABASEDIR = "data//chrome_langchain_db"
+        self._DATABASEDIR = DatabaseHandler.DATABASE_DIR
         self._PROMPTEMPLATE = ChatPromptTemplate.from_messages([
                                 ("system", "You are an expert in answering questions about a TTRPG campaign described in provided documents. "
                                 "The provided documents describe a campaign where the party members (player characters) are {partymembers}. "
@@ -106,14 +106,21 @@ class TTRPGChatbot:
                 st.session_state.model_temperature = None
 
     def __save_user_data(self):
-        user_data = {
+        existing = {}
+        if os.path.isfile(self._USERDATAFILE):
+            try:
+                with open(self._USERDATAFILE, "r") as f:
+                    existing = json.load(f)
+            except Exception:
+                pass
+        existing.update({
             "model_name": st.session_state.model_name,
             "model_temperature": st.session_state.model_temperature,
             "notes_uploaded": st.session_state.notes_uploaded,
-            "party_members": st.session_state.party_members
-        }
+            "party_members": st.session_state.party_members,
+        })
         with open(self._USERDATAFILE, "w") as f:
-            json.dump(user_data, f)
+            json.dump(existing, f)
 
     def __process_journal_options(self):
         with st.sidebar:
@@ -161,7 +168,7 @@ class TTRPGChatbot:
         note_document = None
         model_ready = st.session_state.model_name is not None
 
-        if self.__has_subfolders(self._DATABASEDIR) and (st.session_state.reupload_key == False):
+        if self.summaryhandler.raw_notes_exist() and (st.session_state.reupload_key == False):
             st.session_state.notes_uploaded = True
             sidebar_button = st.sidebar.button('Re-Upload Notes', disabled=not model_ready,
                                                help="Select a model before re-uploading notes." if not model_ready else None)
@@ -231,15 +238,6 @@ class TTRPGChatbot:
 
         return returnCode
 
-
-    def __has_subfolders(self,directory_path):
-        if not os.path.isdir(directory_path):
-            return False  # Not a valid directory
-        for item in os.listdir(directory_path):
-            item_path = os.path.join(directory_path, item)
-            if os.path.isdir(item_path):
-                return True
-        return False
 
     def __reset_chat_history(self):
         st.session_state.messages = []

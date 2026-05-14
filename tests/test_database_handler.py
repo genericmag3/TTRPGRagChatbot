@@ -263,7 +263,7 @@ class TestCreateRetrivalArtifacts:
     def test_same_embeddings_instance_passed_to_splitter_and_chroma(self):
         mock_embeddings = MagicMock()
         with patch.object(
-            self.db, "_DatabaseHandler__load_hf_embeddings", return_value=mock_embeddings
+            self.db, "_DatabaseHandler__load_embeddings", return_value=mock_embeddings
         ), patch("src.utils.DatabaseHandler.Chroma") as mock_chroma, \
            patch("src.utils.DatabaseHandler.SemanticChunker") as mock_splitter:
             self.db.create_retrival_artifacts("data/test_db")
@@ -304,7 +304,7 @@ class TestCreateRetrivalArtifacts:
             return mock_store
 
         with patch("src.utils.DatabaseHandler.Chroma", side_effect=chroma_side_effect), \
-             patch.object(self.db, "_DatabaseHandler__load_hf_embeddings", return_value=MagicMock()), \
+             patch.object(self.db, "_DatabaseHandler__load_embeddings", return_value=MagicMock()), \
              patch("src.utils.DatabaseHandler.SemanticChunker"):
             self.db.create_retrival_artifacts(str(db_dir))
 
