@@ -1,6 +1,7 @@
 """Unit tests for NoteEditor module-level utility functions — no Streamlit runtime."""
 
 import io
+import json
 import os
 import pytest
 import pandas as pd
@@ -13,6 +14,8 @@ from src.app.NoteEditor import (
     raw_notes_to_text,
     build_txt_content,
     build_docx_bytes,
+    load_editor_config,
+    save_editor_config,
     _EditorDocument,
 )
 
@@ -166,6 +169,66 @@ class TestBuildDocxBytes:
         result = build_docx_bytes("Chapter One\nText here.")
         assert isinstance(result, bytes)
         assert len(result) > 0
+
+
+class TestLoadEditorConfig:
+    def test_returns_defaults_when_file_absent(self, tmp_path):
+        config = load_editor_config(str(tmp_path / "nonexistent.json"))
+        assert "font_family" in config
+        assert "font_size" in config
+
+    def test_returns_saved_font_family(self, tmp_path):
+        f = tmp_path / "config.json"
+        f.write_text(json.dumps({"font_family": "Arial", "font_size": 18}), encoding="utf-8")
+        assert load_editor_config(str(f))["font_family"] == "Arial"
+
+    def test_returns_saved_font_size(self, tmp_path):
+        f = tmp_path / "config.json"
+        f.write_text(json.dumps({"font_family": "Arial", "font_size": 18}), encoding="utf-8")
+        assert load_editor_config(str(f))["font_size"] == 18
+
+    def test_returns_defaults_on_corrupt_json(self, tmp_path):
+        f = tmp_path / "config.json"
+        f.write_text("not valid json", encoding="utf-8")
+        config = load_editor_config(str(f))
+        assert "font_family" in config
+        assert "font_size" in config
+
+    def test_returns_defaults_on_read_error(self, tmp_path):
+        f = tmp_path / "config.json"
+        f.write_text(json.dumps({"font_family": "Arial", "font_size": 18}), encoding="utf-8")
+        with patch("builtins.open", side_effect=OSError("permission denied")):
+            config = load_editor_config(str(f))
+        assert "font_family" in config
+        assert "font_size" in config
+
+
+class TestSaveEditorConfig:
+    def test_creates_file_with_font_family(self, tmp_path):
+        filepath = str(tmp_path / "config.json")
+        save_editor_config(filepath, {"font_family": "Arial", "font_size": 14})
+        with open(filepath, "r", encoding="utf-8") as f:
+            assert json.load(f)["font_family"] == "Arial"
+
+    def test_creates_file_with_font_size(self, tmp_path):
+        filepath = str(tmp_path / "config.json")
+        save_editor_config(filepath, {"font_family": "Arial", "font_size": 14})
+        with open(filepath, "r", encoding="utf-8") as f:
+            assert json.load(f)["font_size"] == 14
+
+    def test_creates_parent_directory(self, tmp_path):
+        filepath = str(tmp_path / "subdir" / "config.json")
+        save_editor_config(filepath, {"font_family": "Georgia", "font_size": 16})
+        assert os.path.isfile(filepath)
+
+    def test_overwrites_existing_config(self, tmp_path):
+        filepath = str(tmp_path / "config.json")
+        save_editor_config(filepath, {"font_family": "Georgia", "font_size": 16})
+        save_editor_config(filepath, {"font_family": "Arial", "font_size": 20})
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["font_family"] == "Arial"
+        assert data["font_size"] == 20
 
 
 class TestEditorDocument:

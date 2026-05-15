@@ -85,6 +85,31 @@ def raw_notes_to_text(raw_notes_path: str) -> str:
     return "\n".join(parts).strip()
 
 
+_DEFAULT_EDITOR_CONFIG = {"font_family": "Georgia", "font_size": 16}
+
+_FONT_OPTIONS = ["Georgia", "Arial", "Courier New", "Times New Roman", "Palatino Linotype"]
+
+
+def load_editor_config(filepath: str) -> dict:
+    """Return editor config from disk, or defaults if unavailable."""
+    if os.path.isfile(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return dict(_DEFAULT_EDITOR_CONFIG)
+
+
+def save_editor_config(filepath: str, config: dict) -> None:
+    """Persist editor config to disk, creating parent directories as needed."""
+    dir_path = os.path.dirname(filepath)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(config, f)
+
+
 def build_txt_content(content: str) -> str:
     """Return plain text content for TXT export."""
     return content or ""
@@ -124,6 +149,7 @@ class NoteEditor:
     _NOTES_FILE = "data/editor_notes.txt"
     _RAW_NOTES_FILE = "data/raw_notes.json"
     _CAMPAIGN_SUMMARY_FILE = "data/campaign_summary.json"
+    _CONFIG_FILE = "data/editor_config.json"
 
     def __init__(self):
         if "databasehandler" not in st.session_state:
@@ -139,6 +165,10 @@ class NoteEditor:
             st.session_state.editor_content = saved
         if "editor_key" not in st.session_state:
             st.session_state.editor_key = 0
+        if "editor_font_family" not in st.session_state:
+            config = load_editor_config(self._CONFIG_FILE)
+            st.session_state.editor_font_family = config.get("font_family", _DEFAULT_EDITOR_CONFIG["font_family"])
+            st.session_state.editor_font_size = config.get("font_size", _DEFAULT_EDITOR_CONFIG["font_size"])
 
     def __import_uploaded_notes(self):
         text = raw_notes_to_text(self._RAW_NOTES_FILE)
@@ -214,6 +244,19 @@ class NoteEditor:
 
             st.divider()
 
+            st.subheader("🔤 Text Formatting")
+            current_font = st.session_state.get("editor_font_family", _DEFAULT_EDITOR_CONFIG["font_family"])
+            current_size = st.session_state.get("editor_font_size", _DEFAULT_EDITOR_CONFIG["font_size"])
+            font_idx = _FONT_OPTIONS.index(current_font) if current_font in _FONT_OPTIONS else 0
+            new_font = st.selectbox("Font", _FONT_OPTIONS, index=font_idx)
+            new_size = st.slider("Size (px)", min_value=10, max_value=28, value=current_size, step=2)
+            if new_font != current_font or new_size != current_size:
+                st.session_state.editor_font_family = new_font
+                st.session_state.editor_font_size = new_size
+                save_editor_config(self._CONFIG_FILE, {"font_family": new_font, "font_size": new_size})
+
+            st.divider()
+
             st.subheader("🧠 Vectorize")
             has_content = bool(st.session_state.get("editor_content", "").strip())
             if st.button(
@@ -250,6 +293,8 @@ class NoteEditor:
             key=f"note_editor_{st.session_state.editor_key}",
             initial_value=st.session_state.get("editor_content", ""),
             height=600,
+            font_family=st.session_state.get("editor_font_family", _DEFAULT_EDITOR_CONFIG["font_family"]),
+            font_size=st.session_state.get("editor_font_size", _DEFAULT_EDITOR_CONFIG["font_size"]),
         )
         if new_content != st.session_state.editor_content:
             st.session_state.editor_content = new_content
