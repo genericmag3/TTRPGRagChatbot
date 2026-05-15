@@ -45,6 +45,9 @@ sys.modules["langchain_experimental.text_splitter"] = mock_exp_splitter
 # --- streamlit_lottie ---
 sys.modules["streamlit_lottie"] = MagicMock()
 
+# --- st_tiny_editor ---
+sys.modules["st_tiny_editor"] = MagicMock()
+
 # --- torch / transformers / HuggingFace (no longer used but may be
 #     pulled in transitively by other langchain packages) ---
 for heavy in ("torch", "torchvision", "transformers",

@@ -54,7 +54,7 @@ def main() -> None:
     # (needed when _MEIPASS != exe_dir, i.e. PyInstaller >= 6).
     if bundle_dir != exe_dir:
         import shutil
-        for folder in ("assets", "src"):
+        for folder in ("assets", "pages", "src"):
             src = os.path.join(bundle_dir, folder)
             dst = os.path.join(exe_dir, folder)
             if os.path.isdir(src) and not os.path.isdir(dst):
