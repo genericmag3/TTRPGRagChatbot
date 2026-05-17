@@ -12,6 +12,8 @@ from streamlit_lottie import st_lottie
 
 from ..utils import DatabaseHandler
 from ..utils.TextEditorHandler import TextEditorHandler
+from ..utils import paths
+from .. import app_config
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +159,17 @@ class NoteEditor:
         self.databasehandler = st.session_state.databasehandler
         self._editor = TextEditorHandler()
 
+        if app_config.is_remote():
+            uid = st.session_state.get("auth_user_id")
+            paths.ensure_data_root(uid)
+            self._NOTES_FILE = paths.editor_notes_file(uid)
+            self._RAW_NOTES_FILE = paths.raw_notes_file(uid)
+            self._CAMPAIGN_SUMMARY_FILE = paths.summary_file(uid)
+            self._CONFIG_FILE = paths.editor_config_file(uid)
+            self._DATABASEDIR = paths.database_dir(uid)
+        else:
+            self._DATABASEDIR = DatabaseHandler.DATABASE_DIR
+
     def __init_state_variables(self):
         if "editor_content" not in st.session_state:
             saved = load_editor_notes(self._NOTES_FILE)
@@ -183,12 +196,12 @@ class NoteEditor:
             st.error("No content in the editor to vectorize.")
             return
 
-        self.databasehandler.clear_database(DatabaseHandler.DATABASE_DIR)
+        self.databasehandler.clear_database(self._DATABASEDIR)
         for stale in (self._RAW_NOTES_FILE, self._CAMPAIGN_SUMMARY_FILE):
             if os.path.isfile(stale):
                 os.remove(stale)
 
-        self.databasehandler.create_retrival_artifacts(DatabaseHandler.DATABASE_DIR)
+        self.databasehandler.create_retrival_artifacts(self._DATABASEDIR)
 
         doc = _EditorDocument(content)
 
@@ -206,7 +219,7 @@ class NoteEditor:
                 st_lottie(magic_loader, height=200, key="editor_vectorize_spinner")
 
         progress_bar = progress_slot.progress(0, text="Vectorizing notes...")
-        gen = self.databasehandler.generate_database(doc, DatabaseHandler.DATABASE_DIR)
+        gen = self.databasehandler.generate_database(doc, self._DATABASEDIR)
         return_code = None
 
         while True:
@@ -222,7 +235,7 @@ class NoteEditor:
 
         if return_code:
             if self.databasehandler.last_processed_df is not None:
-                os.makedirs("data", exist_ok=True)
+                os.makedirs(os.path.dirname(self._RAW_NOTES_FILE) or ".", exist_ok=True)
                 self.databasehandler.last_processed_df.to_json(self._RAW_NOTES_FILE)
             st.toast("📜 Notes vectorized successfully!", icon="🧙‍♂️")
         else:

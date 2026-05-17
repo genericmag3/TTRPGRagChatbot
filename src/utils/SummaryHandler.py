@@ -42,8 +42,14 @@ class SummaryHandler:
     SUMMARY_FILE = "data/campaign_summary.json"
     RAW_NOTES_FILE = "data/raw_notes.json"
 
-    def __init__(self, llm_handler):
+    def __init__(self, llm_handler, summary_file=None, raw_notes_file=None):
         self.llm_handler = llm_handler
+        # When given explicit paths (remote multi-user mode) shadow the
+        # class-level defaults so each user's summary stays isolated.
+        if summary_file is not None:
+            self.SUMMARY_FILE = summary_file
+        if raw_notes_file is not None:
+            self.RAW_NOTES_FILE = raw_notes_file
 
     def summary_exists(self):
         return os.path.isfile(self.SUMMARY_FILE)
@@ -127,7 +133,7 @@ class SummaryHandler:
             "model": model_name,
             "generated_at": datetime.datetime.now().isoformat(),
         }
-        os.makedirs("data", exist_ok=True)
+        os.makedirs(os.path.dirname(self.SUMMARY_FILE) or ".", exist_ok=True)
         with open(self.SUMMARY_FILE, "w") as f:
             json.dump(result, f)
 

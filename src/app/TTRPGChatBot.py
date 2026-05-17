@@ -11,6 +11,8 @@ import uuid
 from ..utils import DatabaseHandler
 from ..utils import LLMHandler
 from ..utils import SummaryHandler
+from ..utils import paths
+from .. import app_config
 
 class TTRPGChatbot:
     _USERDATAFILE = "data//user_data.json"
@@ -28,12 +30,28 @@ class TTRPGChatbot:
                                 )
                             ])
 
+        # Resolve where this user's data lives. Local mode keeps the
+        # historical global paths; remote mode scopes everything to the
+        # authenticated user so campaigns never collide on a shared host.
+        if app_config.is_remote():
+            uid = st.session_state.get("auth_user_id")
+            paths.ensure_data_root(uid)
+            self._USERDATAFILE = paths.user_data_file(uid)
+            self._raw_notes_path = paths.raw_notes_file(uid)
+            self._summary_path = paths.summary_file(uid)
+            self._DATABASEDIR = paths.database_dir(uid)
+        else:
+            self._raw_notes_path = "data/raw_notes.json"
+            self._summary_path = "data/campaign_summary.json"
+
         # init class datamembers
         if 'databasehandler' not in st.session_state:
             st.session_state.databasehandler = DatabaseHandler.DatabaseHandler()
         self.databasehandler = st.session_state.databasehandler # Class should handle all interactions with the vector database, including creation, retrieval, and updates. Vector store instance should exist within this class.
         self.llmhandler = LLMHandler.LLMHandler() # Class should handle model loading and inference. Model instance should exist within this class.
-        self.summaryhandler = SummaryHandler.SummaryHandler(self.llmhandler)
+        self.summaryhandler = SummaryHandler.SummaryHandler(
+            self.llmhandler, summary_file=self._summary_path, raw_notes_file=self._raw_notes_path
+        )
 
         # init static chat window UI
         self.__init_UI()
@@ -174,7 +192,7 @@ class TTRPGChatbot:
                                                help="Select a model before re-uploading notes." if not model_ready else None)
             if sidebar_button:
                 self.databasehandler.clear_database(self._DATABASEDIR)
-                for stale in ("data/raw_notes.json", "data/campaign_summary.json"):
+                for stale in (self._raw_notes_path, self._summary_path):
                     if os.path.isfile(stale):
                         os.remove(stale)
                 st.session_state.summary_generated = False
@@ -233,8 +251,8 @@ class TTRPGChatbot:
 
         # Persist the raw notes DataFrame so the summary page and SummaryHandler can access it
         if self.databasehandler.last_processed_df is not None:
-            os.makedirs("data", exist_ok=True)
-            self.databasehandler.last_processed_df.to_json("data/raw_notes.json")
+            os.makedirs(os.path.dirname(self._raw_notes_path) or ".", exist_ok=True)
+            self.databasehandler.last_processed_df.to_json(self._raw_notes_path)
 
         return returnCode
 

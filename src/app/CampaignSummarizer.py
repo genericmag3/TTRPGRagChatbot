@@ -6,6 +6,8 @@ from streamlit_lottie import st_lottie
 
 from ..utils import LLMHandler
 from ..utils import SummaryHandler
+from ..utils import paths
+from .. import app_config
 
 
 class CampaignSummarizer:
@@ -13,7 +15,17 @@ class CampaignSummarizer:
 
     def __init__(self):
         self.llm_handler = LLMHandler.LLMHandler()
-        self.summary_handler = SummaryHandler.SummaryHandler(self.llm_handler)
+        if app_config.is_remote():
+            uid = st.session_state.get("auth_user_id")
+            paths.ensure_data_root(uid)
+            self._USERDATAFILE = paths.user_data_file(uid)
+            self.summary_handler = SummaryHandler.SummaryHandler(
+                self.llm_handler,
+                summary_file=paths.summary_file(uid),
+                raw_notes_file=paths.raw_notes_file(uid),
+            )
+        else:
+            self.summary_handler = SummaryHandler.SummaryHandler(self.llm_handler)
 
     def _notes_in_database(self):
         return self.summary_handler.raw_notes_exist()
@@ -76,7 +88,7 @@ class CampaignSummarizer:
                 pass
         existing["summary_model_name"] = st.session_state.summary_model_name
         existing["summary_model_temperature"] = st.session_state.summary_model_temperature
-        os.makedirs("data", exist_ok=True)
+        os.makedirs(os.path.dirname(self._USERDATAFILE) or ".", exist_ok=True)
         with open(self._USERDATAFILE, "w") as f:
             json.dump(existing, f)
 
