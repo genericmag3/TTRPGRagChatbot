@@ -79,6 +79,56 @@ class TestSaveUserData:
 
 
 # ---------------------------------------------------------------------------
+# __init_state_variables — resilience to a persisted-but-missing model
+# ---------------------------------------------------------------------------
+
+class TestInitStateVariablesMissingModel:
+    """If user_data.json names a model no longer installed in ollama, startup
+    must not crash; the app falls back to no model so the user can pick one."""
+
+    def _bot_with_userdata(self, tmp_path, user_data):
+        bot = _make_bot()
+        bot.summaryhandler = MagicMock()
+        bot.summaryhandler.summary_exists.return_value = False
+        data_file = tmp_path / "user_data.json"
+        data_file.write_text(json.dumps(user_data))
+        bot._USERDATAFILE = str(data_file)
+        return bot
+
+    _UD = {
+        "model_name": "llama3:latest",
+        "model_temperature": 0.7,
+        "notes_uploaded": False,
+        "party_members": [{"id": "p1", "name": "", "note_taker": True}],
+    }
+
+    def test_does_not_raise_when_model_unavailable(self, tmp_path):
+        bot = self._bot_with_userdata(tmp_path, self._UD)
+        bot.llmhandler.load_model.side_effect = ValueError("Model llama3:latest not found")
+        ss = _SS()
+        with patch("streamlit.session_state", ss), patch("streamlit.warning"):
+            result = bot._TTRPGChatbot__init_state_variables()
+        assert result is True
+
+    def test_clears_model_when_unavailable(self, tmp_path):
+        bot = self._bot_with_userdata(tmp_path, self._UD)
+        bot.llmhandler.load_model.side_effect = ValueError("Model llama3:latest not found")
+        ss = _SS()
+        with patch("streamlit.session_state", ss), patch("streamlit.warning"):
+            bot._TTRPGChatbot__init_state_variables()
+        assert ss["model_name"] is None
+        assert ss["model_temperature"] is None
+
+    def test_keeps_model_when_available(self, tmp_path):
+        bot = self._bot_with_userdata(tmp_path, self._UD)
+        ss = _SS()
+        with patch("streamlit.session_state", ss):
+            bot._TTRPGChatbot__init_state_variables()
+        assert ss["model_name"] == "llama3:latest"
+        bot.llmhandler.load_model.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # __stream_data
 # ---------------------------------------------------------------------------
 
@@ -189,6 +239,7 @@ class TestProcessChatHappyPath:
             buttoninfo=[],
             button_key=0,
             party_members=party_members,
+            is_processing=True,
         )
         return bot, ss
 
@@ -199,10 +250,12 @@ class TestProcessChatHappyPath:
         return note
 
     def _run_chat(self, bot, ss, question, notes, llm_response="Answer."):
+        # Simulate Phase 2: a question was already captured in Phase 1
+        ss["_pending_chat"] = question
         bot.databasehandler.retrieve_notes.return_value = notes
         bot.llmhandler.invoke_model.return_value = llm_response
         with patch("streamlit.session_state", ss), \
-             patch("streamlit.chat_input", return_value=question), \
+             patch("streamlit.chat_input", return_value=None), \
              patch("streamlit.chat_message", return_value=MagicMock()), \
              patch("streamlit.markdown"), \
              patch("streamlit.write_stream"), \

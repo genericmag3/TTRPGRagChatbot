@@ -171,6 +171,7 @@ class TestRunPartyMemberGate:
         ss = _SS(
             summary_model_name="llama3:latest",
             party_members=[{"id": "1", "name": "Aria", "note_taker": True}],
+            is_processing=False,
         )
         button_called = []
         warning_called = []
@@ -204,6 +205,7 @@ class TestRunTimeWarning:
         ss = _SS(
             summary_model_name="llama3:latest",
             party_members=[{"id": "1", "name": "Aria", "note_taker": True}],
+            is_processing=False,
         )
         warning_calls = []
         with patch("streamlit.session_state", ss), \
