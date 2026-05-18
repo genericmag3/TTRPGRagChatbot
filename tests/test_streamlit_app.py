@@ -81,6 +81,9 @@ def _run_app() -> AppTest:
         # Hide user_data.json so app initialises with defaults
         if "user_data" in str(path):
             return False
+        # Hide raw_notes.json so notes_uploaded stays False (no DB state)
+        if "raw_notes" in str(path):
+            return False
         return real_isfile(path)
 
     def _isdir(path):

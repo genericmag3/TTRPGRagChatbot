@@ -43,6 +43,9 @@ class TTRPGChatbot:
             st.rerun() # retry initialization after handling error
 
     def __init_state_variables(self):
+        if 'is_processing' not in st.session_state:
+            st.session_state.is_processing = False
+
         # Initialize session state variables for model, database upload handling, and document retriever for storing in memory to avoid reload
         if ("reupload_key" not in st.session_state) or ("model_name" not in st.session_state) or ("model_temperature" not in st.session_state) or ("notes_uploaded" not in st.session_state) or ("messages" not in st.session_state) or ("buttoninfo" not in st.session_state) or ("button_key" not in st.session_state) or ("party_members" not in st.session_state) or ("delete_index" not in st.session_state) or ("summary_generated" not in st.session_state):
             if os.path.isfile(self._USERDATAFILE):
@@ -89,13 +92,15 @@ class TTRPGChatbot:
             st.header("🔧 Model Options")
             sidebar_model_select = st.sidebar.selectbox("Select Model", local_model_names,
                                                         placeholder="Select local LLM...",
-                                                        index=local_model_names.index(st.session_state.model_name) if st.session_state.model_name in local_model_names else None)
+                                                        index=local_model_names.index(st.session_state.model_name) if st.session_state.model_name in local_model_names else None,
+                                                        disabled=st.session_state.is_processing)
             sidebar_model_temperature = st.sidebar.slider("Select Model Temperature",
                                                         min_value=0.0,
                                                         max_value=1.0,
                                                         value=st.session_state.model_temperature if st.session_state.model_temperature is not None else 0.7,
                                                         step=0.1,
-                                                        key="model_temperature_slider")
+                                                        key="model_temperature_slider",
+                                                        disabled=st.session_state.is_processing)
             if ((sidebar_model_select is not None) and (sidebar_model_temperature is not None)):
                 st.session_state.model_name = sidebar_model_select
                 st.session_state.model_temperature = sidebar_model_temperature
@@ -140,11 +145,12 @@ class TTRPGChatbot:
                         f"Member {i+1}",
                         key=f"input_{m_id}",
                         value=member['name'],
-                        label_visibility="collapsed"  # Makes it more compact
+                        label_visibility="collapsed",
+                        disabled=st.session_state.is_processing,
                     )
 
                 with col2:
-                    is_disabled = any_note_taker_selected and not member.get('note_taker', False)
+                    is_disabled = (any_note_taker_selected and not member.get('note_taker', False)) or st.session_state.is_processing
                     st.checkbox(f"Note Taker", key=f"note_taker_{m_id}", help="Check if this party member is the note taker for processed notes.", on_change=self.__toggle_note_taker, args=(m_id,), disabled=is_disabled, value=member.get('note_taker', True))
                     # Auto-update name when changed
                     if new_name != member['name']:
@@ -156,12 +162,13 @@ class TTRPGChatbot:
                         "🗑️",
                         key=f"delete_{m_id}",
                         use_container_width=False,
-                        type="secondary",  # Smaller secondary button style
+                        type="secondary",
                         on_click=self.__delete_member,
-                        args=(m_id,)
+                        args=(m_id,),
+                        disabled=st.session_state.is_processing,
                     )
 
-            if st.button('➕ Add New Member', type='primary'):
+            if st.button('➕ Add New Member', type='primary', disabled=st.session_state.is_processing):
                 st.session_state.party_members.append({'id': str(uuid.uuid4()), 'name': None, 'note_taker': False})
                 st.rerun()
 
@@ -170,7 +177,8 @@ class TTRPGChatbot:
 
         if self.summaryhandler.raw_notes_exist() and (st.session_state.reupload_key == False):
             st.session_state.notes_uploaded = True
-            sidebar_button = st.sidebar.button('Re-Upload Notes', disabled=not model_ready,
+            sidebar_button = st.sidebar.button('Re-Upload Notes',
+                                               disabled=not model_ready or st.session_state.is_processing,
                                                help="Select a model before re-uploading notes." if not model_ready else None)
             if sidebar_button:
                 self.databasehandler.clear_database(self._DATABASEDIR)
@@ -189,14 +197,23 @@ class TTRPGChatbot:
                 if not model_ready:
                     st.info("⚠️ Please select a model in **Model Options** before uploading campaign notes.")
                 else:
-                    note_document = st.file_uploader("Upload your campaign notes", type=["txt", "docx", "csv"])
+                    note_document = st.file_uploader("Upload your campaign notes", type=["txt", "docx", "csv"],
+                                                     disabled=st.session_state.is_processing)
         # Init text splitter, retriever, and vector database
         self.databasehandler.create_retrival_artifacts(self._DATABASEDIR)
         # Check to see if user uploaded notes
         if note_document is not None:
+            if not st.session_state.get('_processing_upload'):
+                # Phase 1: disable UI on the next run before processing begins
+                st.session_state.is_processing = True
+                st.session_state._processing_upload = True
+                st.rerun()
+            # Phase 2 (after rerun with all widgets disabled): process the file
             placeholder.empty()
+            st.session_state.pop('_processing_upload', None)
             st.session_state.reupload_key = False
             st.session_state.notes_uploaded = self.__create_database_handler(note_document)
+            st.session_state.is_processing = False
             if st.session_state.notes_uploaded:
                 with st.toast("📜🪶 Notes processed successfully!", icon="🧙‍♂️"):
                     pass
@@ -204,6 +221,7 @@ class TTRPGChatbot:
             else:
                 with st.toast("❌ Notes processing failed! Check disk space or existence of journal.", icon="🧙‍♂️"):
                     pass
+            st.rerun()
 
         self.__save_user_data()
 
@@ -252,32 +270,30 @@ class TTRPGChatbot:
                 if (message["role"] == "assistant"):
                     if(st.session_state.buttoninfo[i] is not None):
                         for buttoninfo in st.session_state.buttoninfo[i]:
-                            st.button(buttoninfo[0], on_click = buttoninfo[1], args = buttoninfo[2], key = buttoninfo[3])
+                            st.button(buttoninfo[0], on_click = buttoninfo[1], args = buttoninfo[2], key = buttoninfo[3],
+                                      disabled=st.session_state.is_processing)
                     i = i + 1
 
     def __process_chat(self):
         if st.session_state.notes_uploaded and (st.session_state.model_name is not None):
-            user_question = st.chat_input("Ask a question about the campaign...")
+            # Phase 2: process a pending question (widgets already disabled from Phase 1 rerun)
+            user_question = st.session_state.pop('_pending_chat', None)
             if user_question:
                 tempbuttoninfo = []
-                st.session_state.messages.append({"role": "user", "content": user_question,"avatar":None})
+                st.session_state.messages.append({"role": "user", "content": user_question, "avatar": None})
                 with st.chat_message("user"):
                     st.markdown(user_question)
 
                 placeholder = st.empty()
 
-                # Load animation from json
-                with open("assets/star-magic.json", "r",errors='ignore') as f:
+                with open("assets/star-magic.json", "r", errors='ignore') as f:
                     magic_spinner = json.load(f)
 
-                # Display the animation initially
                 with placeholder.container():
                     st_lottie(magic_spinner, height=200, key="custom_spinner")
 
-                # retrieve relevant notes from the datababse based on the user query
                 notes = self.databasehandler.retrieve_notes(user_question)
 
-                # Pass user query plus relevant notes to the model and get response if relevant notes are found
                 if len(notes) > 0:
                     members = [member['name'] for member in st.session_state.party_members]
                     if len(members) > 1:
@@ -285,36 +301,36 @@ class TTRPGChatbot:
                     else:
                         formatted_members = ', '.join(members)
                     note_taker = [member['name'] for member in st.session_state.party_members if member.get('note_taker', False)][0]
-                    response = self.llmhandler.invoke_model(self._PROMPTEMPLATE, {"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})  # Pass the query relevant note documents, party member names, and note taker name to the model
+                    response = self.llmhandler.invoke_model(self._PROMPTEMPLATE, {"question": user_question, "partymembers": formatted_members, "notes": notes, "notetaker": note_taker})
 
                     placeholder.empty()
                     references_found = True
                     with st.chat_message("assistant", avatar="🧙‍♂️"):
-
-                    # Only display references if any were found
                         if(references_found):
                             response +="\n______________________________________________________\n"
                             response += "Note entry References: \n"
                             st.session_state.messages.append({"role": "assistant", "content": response, "avatar":"🧙‍♂️"})
                             st.write_stream(self.__stream_data(response))
-                            # Create a unique button for each reference
                             for item in notes:
                                 tempbuttoninfo.append([item.metadata["Date"],self.__reference_button, (item.page_content,), f"click_{st.session_state.button_key}"])
-                                st.button(str(item.metadata["Date"]), on_click= self.__reference_button,args=(item.page_content,),  key = f"click_{st.session_state.button_key}")
+                                st.button(str(item.metadata["Date"]), on_click= self.__reference_button, args=(item.page_content,), key = f"click_{st.session_state.button_key}")
                                 time.sleep(0.02)
-                                # Generate new button key for next button
                                 st.session_state.button_key = st.session_state.button_key + 1
-
-                            # Add reference button information for the response to the session state
                             st.session_state.buttoninfo.append(tempbuttoninfo)
-
-                # Save canned response to chat history if no references
                 else:
                     placeholder.empty()
                     response = "Could not find any relevant journal entries for your query. It could be that there is not any relevant information regarding your query in the notes, the question needs to be reworded, or spelling needs to be reviewed."
                     st.session_state.buttoninfo.append(None)
                     st.write_stream(self.__stream_data(response))
                     st.session_state.messages.append({"role": "assistant", "content": response, "avatar":"🧙‍♂️"})
+                st.session_state.is_processing = False
+                st.rerun()
+
+            # Phase 1: capture a new chat question and rerun with UI disabled
+            user_question = st.chat_input("Ask a question about the campaign...", disabled=st.session_state.is_processing)
+            if user_question:
+                st.session_state._pending_chat = user_question
+                st.session_state.is_processing = True
                 st.rerun()
 
     def __stream_data(self, response):

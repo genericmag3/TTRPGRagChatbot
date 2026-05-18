@@ -189,6 +189,7 @@ class TestProcessChatHappyPath:
             buttoninfo=[],
             button_key=0,
             party_members=party_members,
+            is_processing=True,
         )
         return bot, ss
 
@@ -199,10 +200,12 @@ class TestProcessChatHappyPath:
         return note
 
     def _run_chat(self, bot, ss, question, notes, llm_response="Answer."):
+        # Simulate Phase 2: a question was already captured in Phase 1
+        ss["_pending_chat"] = question
         bot.databasehandler.retrieve_notes.return_value = notes
         bot.llmhandler.invoke_model.return_value = llm_response
         with patch("streamlit.session_state", ss), \
-             patch("streamlit.chat_input", return_value=question), \
+             patch("streamlit.chat_input", return_value=None), \
              patch("streamlit.chat_message", return_value=MagicMock()), \
              patch("streamlit.markdown"), \
              patch("streamlit.write_stream"), \

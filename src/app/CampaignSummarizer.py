@@ -19,6 +19,9 @@ class CampaignSummarizer:
         return self.summary_handler.raw_notes_exist()
 
     def __init_state_variables(self):
+        if 'is_processing' not in st.session_state:
+            st.session_state.is_processing = False
+
         needs_model_init = "summary_model_name" not in st.session_state or "summary_model_temperature" not in st.session_state
         needs_party_init = "party_members" not in st.session_state
 
@@ -48,6 +51,7 @@ class CampaignSummarizer:
                 placeholder="Select local LLM...",
                 index=local_model_names.index(st.session_state.summary_model_name)
                       if st.session_state.summary_model_name in local_model_names else None,
+                disabled=st.session_state.is_processing,
             )
             selected_temperature = st.slider(
                 "Select Model Temperature",
@@ -57,6 +61,7 @@ class CampaignSummarizer:
                       if st.session_state.summary_model_temperature is not None else 0.7,
                 step=0.1,
                 key="summary_model_temperature_slider",
+                disabled=st.session_state.is_processing,
             )
             if selected_model is not None:
                 st.session_state.summary_model_name = selected_model
@@ -113,15 +118,28 @@ class CampaignSummarizer:
             st.stop()
 
         st.title("📖 Campaign Summary")
+
+        # Phase 2: execute pending summary generation (widgets already disabled from Phase 1 rerun)
+        if st.session_state.pop('_pending_summary_gen', False):
+            try:
+                self.__generate_and_display()
+            finally:
+                st.session_state.is_processing = False
+            return
+
         st.info("No campaign summary has been generated yet.")
         st.warning(
             "Generating a summary may take several minutes depending on the length "
             "of your notes and your hardware. Please be patient."
         )
-        if not st.button("✨ Generate Campaign Summary", type="primary"):
+
+        # Phase 1: capture button click and rerun with UI disabled
+        if not st.button("✨ Generate Campaign Summary", type="primary", disabled=st.session_state.is_processing):
             st.stop()
 
-        self.__generate_and_display()
+        st.session_state.is_processing = True
+        st.session_state._pending_summary_gen = True
+        st.rerun()
 
     def __render_existing_summary(self, existing):
         generated_date = existing.get("generated_at", "")[:10]
@@ -132,7 +150,7 @@ class CampaignSummarizer:
             st.title("📖 Campaign Summary")
         with btn_col:
             st.write("")
-            if st.button("🔄 Regenerate", use_container_width=True):
+            if st.button("🔄 Regenerate", use_container_width=True, disabled=st.session_state.is_processing):
                 st.session_state._regenerating_summary = True
                 st.rerun()
 

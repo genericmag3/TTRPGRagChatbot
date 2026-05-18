@@ -158,6 +158,9 @@ class NoteEditor:
         self._editor = TextEditorHandler()
 
     def __init_state_variables(self):
+        if 'is_processing' not in st.session_state:
+            st.session_state.is_processing = False
+
         if "editor_content" not in st.session_state:
             saved = load_editor_notes(self._NOTES_FILE)
             if not saved and os.path.isfile(self._RAW_NOTES_FILE):
@@ -227,15 +230,17 @@ class NoteEditor:
             st.toast("📜 Notes vectorized successfully!", icon="🧙‍♂️")
         else:
             st.error("Vectorization failed. Ensure the editor contains valid content.")
+        st.session_state.is_processing = False
 
     def __render_sidebar(self):
         with st.sidebar:
             st.header("📜 Note Options")
 
+            processing = st.session_state.is_processing
             raw_notes_exist = os.path.isfile(self._RAW_NOTES_FILE)
             if st.button(
                 "📥 Load from Uploaded Notes",
-                disabled=not raw_notes_exist,
+                disabled=not raw_notes_exist or processing,
                 help="No uploaded notes found." if not raw_notes_exist else "Replace editor content with notes from the last file upload.",
                 use_container_width=True,
             ):
@@ -248,8 +253,8 @@ class NoteEditor:
             current_font = st.session_state.get("editor_font_family", _DEFAULT_EDITOR_CONFIG["font_family"])
             current_size = st.session_state.get("editor_font_size", _DEFAULT_EDITOR_CONFIG["font_size"])
             font_idx = _FONT_OPTIONS.index(current_font) if current_font in _FONT_OPTIONS else 0
-            new_font = st.selectbox("Font", _FONT_OPTIONS, index=font_idx)
-            new_size = st.slider("Size (px)", min_value=10, max_value=28, value=current_size, step=2)
+            new_font = st.selectbox("Font", _FONT_OPTIONS, index=font_idx, disabled=processing)
+            new_size = st.slider("Size (px)", min_value=10, max_value=28, value=current_size, step=2, disabled=processing)
             if new_font != current_font or new_size != current_size:
                 st.session_state.editor_font_family = new_font
                 st.session_state.editor_font_size = new_size
@@ -263,10 +268,11 @@ class NoteEditor:
                 "⚡ Vectorize Notes",
                 type="primary",
                 use_container_width=True,
-                disabled=not has_content,
+                disabled=not has_content or processing,
                 help="No content to vectorize." if not has_content else "Clear the database and re-vectorize the current editor notes.",
             ):
                 st.session_state._do_vectorize = True
+                st.session_state.is_processing = True
                 st.rerun()
 
             st.divider()
@@ -279,6 +285,7 @@ class NoteEditor:
                 file_name="campaign_notes.txt",
                 mime="text/plain",
                 use_container_width=True,
+                disabled=processing,
             )
             st.download_button(
                 label="📝 Export as DOCX",
@@ -286,6 +293,7 @@ class NoteEditor:
                 file_name="campaign_notes.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
+                disabled=processing,
             )
 
     def __render_editor(self):
@@ -312,5 +320,6 @@ class NoteEditor:
 
         if st.session_state.pop("_do_vectorize", False):
             self.__vectorize_notes()
+            st.rerun()
 
         self.__render_editor()
