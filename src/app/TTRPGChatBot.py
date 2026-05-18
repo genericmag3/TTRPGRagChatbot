@@ -67,7 +67,12 @@ class TTRPGChatbot:
                 st.session_state.delete_index = None
                 st.session_state.summary_generated = self.summaryhandler.summary_exists()
                 if st.session_state.model_name is not None and st.session_state.model_temperature:
-                    self.llmhandler.load_model(str(st.session_state.model_name), st.session_state.model_temperature)
+                    try:
+                        self.llmhandler.load_model(str(st.session_state.model_name), st.session_state.model_temperature)
+                    except ValueError:
+                        st.warning(f"Previously selected model '{st.session_state.model_name}' is no longer available in Ollama. Please select a model in Model Options.")
+                        st.session_state.model_name = None
+                        st.session_state.model_temperature = None
             # 1st run or missing user options data file, initialize session state variables to default values
             else:
                 st.session_state.reupload_key = 0

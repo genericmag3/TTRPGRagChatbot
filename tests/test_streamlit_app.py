@@ -395,3 +395,32 @@ class TestProcessChatFlow:
         user_msgs = [m for m in at.session_state.messages if m["role"] == "user"]
         assert any("wizard" in m["content"].lower() for m in user_msgs)
 
+
+# ---------------------------------------------------------------------------
+# Page navigation — disabled while a long-running task is in progress
+# ---------------------------------------------------------------------------
+
+def _nav_css_present(at) -> bool:
+    """True if the sidebar-nav-disabling CSS was injected on this run."""
+    return any(
+        "stSidebarNav" in md.value and "pointer-events" in md.value
+        for md in at.markdown
+    )
+
+
+class TestNavigationDisabledWhileProcessing:
+    def test_nav_css_injected_when_processing(self):
+        at = _run_preloaded(is_processing=True)
+        assert not at.exception
+        assert _nav_css_present(at)
+
+    def test_nav_css_absent_when_not_processing(self):
+        at = _run_preloaded(is_processing=False)
+        assert not at.exception
+        assert not _nav_css_present(at)
+
+    def test_nav_css_absent_when_flag_unset(self):
+        at = _run_app()
+        assert not at.exception
+        assert not _nav_css_present(at)
+

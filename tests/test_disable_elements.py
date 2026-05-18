@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, mock_open, patch
 from src.app.TTRPGChatBot import TTRPGChatbot
 from src.app.NoteEditor import NoteEditor
 from src.app.CampaignSummarizer import CampaignSummarizer
+from src.utils.NavigationHandler import disable_navigation_if_processing
 
 
 class _SS(dict):
@@ -455,3 +456,33 @@ class TestCampaignSummarizerIsProcessingInit:
         with patch("streamlit.session_state", ss):
             cs._CampaignSummarizer__init_state_variables()
         assert ss.get("is_processing") is True
+
+
+# ---------------------------------------------------------------------------
+# NavigationHandler: page switcher disabled only while processing
+# ---------------------------------------------------------------------------
+
+class TestDisableNavigationIfProcessing:
+    def test_injects_css_when_processing(self):
+        ss = _SS(is_processing=True)
+        with patch("src.utils.NavigationHandler.st.session_state", ss), \
+             patch("src.utils.NavigationHandler.st.markdown") as mock_md:
+            disable_navigation_if_processing()
+        mock_md.assert_called_once()
+        css = mock_md.call_args[0][0]
+        assert "stSidebarNav" in css and "pointer-events" in css
+        assert mock_md.call_args[1]["unsafe_allow_html"] is True
+
+    def test_no_css_when_not_processing(self):
+        ss = _SS(is_processing=False)
+        with patch("src.utils.NavigationHandler.st.session_state", ss), \
+             patch("src.utils.NavigationHandler.st.markdown") as mock_md:
+            disable_navigation_if_processing()
+        mock_md.assert_not_called()
+
+    def test_no_css_when_flag_unset(self):
+        ss = _SS()
+        with patch("src.utils.NavigationHandler.st.session_state", ss), \
+             patch("src.utils.NavigationHandler.st.markdown") as mock_md:
+            disable_navigation_if_processing()
+        mock_md.assert_not_called()
